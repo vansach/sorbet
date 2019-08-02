@@ -232,6 +232,12 @@ LSPResult LSPLoop::processRequestInternal(unique_ptr<core::GlobalState> gs, cons
                     fmt::format("Did not find file at uri {} in {}", params->uri, convertLSPMethodToString(method)));
             }
             return LSPResult::make(move(gs), move(response));
+        } else if (method == LSPMethod::TextDocumentPrepareRename) {
+            auto &params = get<unique_ptr<TextDocumentPositionParams>>(rawParams);
+            return handleTextDocumentPrepareRename(move(gs), id, *params);
+        } else if (method == LSPMethod::TextDocumentRename) {
+            auto &params = get<unique_ptr<RenameParams>>(rawParams);
+            return handleTextDocumentRename(move(gs), id, *params);
         } else if (method == LSPMethod::Shutdown) {
             prodCategoryCounterInc("lsp.messages.processed", "shutdown");
             response->result = JSONNullObject();

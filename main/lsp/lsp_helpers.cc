@@ -125,6 +125,17 @@ unique_ptr<Location> LSPLoop::loc2Location(const core::GlobalState &gs, core::Lo
     return make_unique<Location>(uri, loc2Range(gs, loc));
 }
 
+vector<unique_ptr<Location>> LSPLoop::locs2Locations(const core::GlobalState &gs, vector<core::Loc> locs,
+                                                     std::vector<std::unique_ptr<Location>> locations) {
+    locations.reserve(locations.size() + locs.size());
+    for (auto loc : locs) {
+        if (loc.exists()) {
+            locations.emplace_back(loc2Location(gs, loc));
+        }
+    }
+    return locations;
+}
+
 int cmpPositions(const Position &a, const Position &b) {
     const int line = a.line - b.line;
     if (line != 0) {
@@ -154,30 +165,37 @@ int cmpRanges(const Range &a, const Range &b) {
     return cmpPositions(*a.end, *b.end);
 }
 
-vector<unique_ptr<Location>>
-LSPLoop::extractLocations(const core::GlobalState &gs,
-                          const vector<unique_ptr<core::lsp::QueryResponse>> &queryResponses,
-                          vector<unique_ptr<Location>> locations) {
+int cmpLocs(const core::Loc a, const core::Loc b) {
+    const int fileCmp = a.file().id() - b.file().id();
+    if (fileCmp != 0) {
+        return fileCmp;
+    }
+    const int startCmp = a.beginPos() - b.beginPos();
+    if (startCmp != 0) {
+        return startCmp;
+    }
+    return a.endPos() - b.endPos();
+}
+
+vector<core::Loc> LSPLoop::extractLocs(const core::GlobalState &gs,
+                                       const vector<unique_ptr<core::lsp::QueryResponse>> &queryResponses,
+                                       vector<core::Loc> locs) {
     for (auto &q : queryResponses) {
         core::Loc loc = q->getLoc();
         if (loc.exists() && loc.file().exists()) {
             auto fileIsTyped = loc.file().data(gs).strictLevel >= core::StrictLevel::True;
             // If file is untyped, only support responses involving constants and definitions.
             if (fileIsTyped || q->isConstant() || q->isDefinition()) {
-                addLocIfExists(gs, locations, loc);
+                locs.push_back(loc);
             }
         }
     }
-    // Dedupe locations
-    fast_sort(locations, [](const unique_ptr<Location> &a, const unique_ptr<Location> &b) -> bool {
-        return cmpLocations(*a, *b) < 0;
-    });
-    locations.resize(std::distance(
-        locations.begin(), std::unique(locations.begin(), locations.end(),
-                                       [](const unique_ptr<Location> &a, const unique_ptr<Location> &b) -> bool {
-                                           return cmpLocations(*a, *b) == 0;
-                                       })));
-    return locations;
+    // Dedupe locs
+    fast_sort(locs, [](const core::Loc a, const core::Loc b) -> bool { return cmpLocs(a, b) < 0; });
+    locs.resize(std::distance(
+        locs.begin(), std::unique(locs.begin(), locs.end(),
+                                  [](const core::Loc a, const core::Loc b) -> bool { return cmpLocs(a, b) == 0; })));
+    return locs;
 }
 
 bool hideSymbol(const core::GlobalState &gs, core::SymbolRef sym) {

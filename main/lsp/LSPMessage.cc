@@ -135,12 +135,14 @@ bool LSPMessage::isDelayable() const {
         case LSPMethod::Shutdown:
         case LSPMethod::PAUSE:
         case LSPMethod::RESUME:
-        // Definition, reference, and workspace symbol requests are typically requested directly by the user, so we
-        // shouldn't delay processing them.
+        // Definition, reference, workspace symbol, and rename requests are typically requested directly by the user, so
+        // we shouldn't delay processing them.
         case LSPMethod::TextDocumentDefinition:
         case LSPMethod::TextDocumentCodeAction:
         case LSPMethod::TextDocumentReferences:
         case LSPMethod::WorkspaceSymbol:
+        case LSPMethod::TextDocumentPrepareRename:
+        case LSPMethod::TextDocumentRename:
         // These requests involve a specific file location, and should never be delayed.
         case LSPMethod::TextDocumentHover:
         case LSPMethod::TextDocumentCompletion:

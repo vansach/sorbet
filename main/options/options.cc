@@ -340,6 +340,7 @@ cxxopts::Options buildOptions() {
     options.add_options("advanced")("enable-experimental-lsp-signature-help",
                                     "Enable experimental LSP feature: Signature Help");
     options.add_options("advanced")("enable-experimental-lsp-quick-fix", "Enable experimental LSP feature: Quick Fix");
+    options.add_options("advanced")("enable-experimental-lsp-rename", "Enable experimental LSP feature: Rename");
     options.add_options("advanced")("enable-all-experimental-lsp-features", "Enable every experimental LSP feature.");
     options.add_options("advanced")(
         "ignore",
@@ -655,6 +656,7 @@ void readOptions(Options &opts, int argc, char *argv[],
         opts.lspDocumentSymbolEnabled =
             enableAllLSPFeatures || raw["enable-experimental-lsp-document-symbol"].as<bool>();
         opts.lspSignatureHelpEnabled = enableAllLSPFeatures || raw["enable-experimental-lsp-signature-help"].as<bool>();
+        opts.lspRenameEnabled = enableAllLSPFeatures || raw["enable-experimental-lsp-rename"].as<bool>();
 
         if (raw.count("lsp-directories-missing-from-client") > 0) {
             auto lspDirsMissingFromClient = raw["lsp-directories-missing-from-client"].as<vector<string>>();

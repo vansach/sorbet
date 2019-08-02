@@ -1227,6 +1227,13 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
     // Empty object.
     auto InitializedParams = makeObject("InitializedParams", {}, classTypes);
 
+    auto PrepareRenameResult = makeObject("PrepareRenameResult",
+                                          {
+                                              makeField("range", Range),
+                                              makeField("placeholder", makeOptional(JSONString)),
+                                          },
+                                          classTypes);
+
     /* Sorbet LSP extensions */
     auto SorbetOperationStatus = makeStrEnum("SorbetOperationStatus", {"start", "end"}, enumTypes);
     auto SorbetShowOperationParams = makeObject("SorbetShowOperationParams",
@@ -1320,8 +1327,10 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
                                      "textDocument/didOpen",
                                      "textDocument/documentSymbol",
                                      "textDocument/hover",
+                                     "textDocument/prepareRename",
                                      "textDocument/publishDiagnostics",
                                      "textDocument/references",
+                                     "textDocument/rename",
                                      "textDocument/signatureHelp",
                                      "window/showMessage",
                                      "workspace/symbol",
@@ -1337,7 +1346,9 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
                                                 {"textDocument/definition", TextDocumentPositionParams},
                                                 {"textDocument/hover", TextDocumentPositionParams},
                                                 {"textDocument/completion", CompletionParams},
+                                                {"textDocument/prepareRename", TextDocumentPositionParams},
                                                 {"textDocument/references", ReferenceParams},
+                                                {"textDocument/rename", RenameParams},
                                                 {"textDocument/signatureHelp", TextDocumentPositionParams},
                                                 {"textDocument/codeAction", CodeActionParams},
                                                 {"workspace/symbol", WorkspaceSymbolParams},
@@ -1366,7 +1377,9 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
             // CompletionItem[] | CompletionList | null
             // Sorbet only sends CompletionList.
             {"textDocument/completion", CompletionList},
+            {"textDocument/prepareRename", makeVariant({JSONNull, PrepareRenameResult})},
             {"textDocument/references", makeVariant({JSONNull, makeArray(Location)})},
+            {"textDocument/rename", makeVariant({JSONNull, WorkspaceEdit})},
             {"textDocument/signatureHelp", makeVariant({JSONNull, SignatureHelp})},
             // (CodeAction | Command)[] | null
             // Sorbet only sends CodeAction[].

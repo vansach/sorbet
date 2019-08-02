@@ -4,12 +4,6 @@
 using namespace std;
 
 namespace sorbet::realmain::lsp {
-void LSPLoop::addLocIfExists(const core::GlobalState &gs, vector<unique_ptr<Location>> &locs, core::Loc loc) {
-    if (loc.file().exists()) {
-        locs.push_back(loc2Location(gs, loc));
-    }
-}
-
 LSPResult LSPLoop::handleTextDocumentDefinition(unique_ptr<core::GlobalState> gs, const MessageId &id,
                                                 const TextDocumentPositionParams &params) {
     auto response = make_unique<ResponseMessage>("2.0", id, LSPMethod::TextDocumentDefinition);
@@ -28,8 +22,10 @@ LSPResult LSPLoop::handleTextDocumentDefinition(unique_ptr<core::GlobalState> gs
             // Only support go-to-definition on constants in untyped files.
             if (resp->isConstant() || (fileIsTyped && (resp->isIdent() || resp->isLiteral()))) {
                 auto retType = resp->getTypeAndOrigins();
-                for (auto &originLoc : retType.origins) {
-                    addLocIfExists(*gs, result, originLoc);
+                for (auto loc : retType.origins) {
+                    if (loc.exists()) {
+                        result.emplace_back(loc2Location(*gs, loc));
+                    }
                 }
             } else if (fileIsTyped && resp->isDefinition()) {
                 result.push_back(loc2Location(*gs, resp->isDefinition()->termLoc));
@@ -38,7 +34,7 @@ LSPResult LSPLoop::handleTextDocumentDefinition(unique_ptr<core::GlobalState> gs
                 auto start = sendResp->dispatchResult.get();
                 while (start != nullptr) {
                     if (start->main.method.exists() && !start->main.receiver->isUntyped()) {
-                        addLocIfExists(*gs, result, start->main.method.data(*gs)->loc());
+                        result = locs2Locations(*gs, {start->main.method.data(*gs)->loc()}, move(result));
                     }
                     start = start->secondary.get();
                 }
