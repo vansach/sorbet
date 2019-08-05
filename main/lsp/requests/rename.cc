@@ -1,4 +1,6 @@
 #include "absl/strings/match.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 #include "core/lsp/QueryResponse.h"
 #include "main/lsp/lsp.h"
 
@@ -6,24 +8,54 @@ using namespace std;
 
 namespace sorbet::realmain::lsp {
 
-LSPWorkspaceEdit LSPLoop::getRenameEdits(unique_ptr<core::GlobalState> gs, core::SymbolRef symbol) {
-    vector<unique_ptr<Location>> references;
-    auto refResult = getReferencesToSymbol(move(gs), symbol);
-    gs = move(refResult.gs);
+core::Loc range2Loc(const core::GlobalState &gs, const Range &range, core::FileRef file) {
+    ENFORCE(range.start->line >= 0);
+    ENFORCE(range.start->character >= 0);
+    ENFORCE(range.end->line >= 0);
+    ENFORCE(range.end->character >= 0);
 
+    auto start = core::Loc::pos2Offset(file.data(gs),
+                                       core::Loc::Detail{(u4)range.start->line + 1, (u4)range.start->character + 1});
+    auto end =
+        core::Loc::pos2Offset(file.data(gs), core::Loc::Detail{(u4)range.end->line + 1, (u4)range.end->character + 1});
+
+    return core::Loc(file, start, end);
+}
+
+pair<unique_ptr<core::GlobalState>, unique_ptr<WorkspaceEdit>>
+LSPLoop::getRenameEdits(unique_ptr<core::GlobalState> gs, core::SymbolRef symbol, std::string_view newName) {
+    vector<unique_ptr<Location>> references;
+    tie(gs, references) = getReferencesToSymbol(move(gs), symbol, move(references));
+
+    auto originalName = symbol.data(*gs)->name.toString(*gs);
     auto we = make_unique<WorkspaceEdit>();
-    vector<unique_ptr<TextDocumentEdit>> edits;
-    for (auto loc : refResult.locs) {
-        if (loc.exists()) {
-            // Get source text at location.
+    // TextEdit
+    UnorderedMap<string, vector<unique_ptr<TextEdit>>> edits;
+    for (auto &location : references) {
+        // Get text at location.
+        // TODO: Not payload files...?
+        auto fref = uri2FileRef(location->uri);
+        if (fref.data(*gs).isPayload()) {
+            // We don't support renaming things in payload files.
+            // TODO: Error?
+            continue;
         }
+        auto loc = range2Loc(*gs, *location->range, fref);
+        auto source = loc.source(*gs);
+        std::vector<std::string> strs = absl::StrSplit(source, "::");
+        strs[strs.size() - 1] = string(newName);
+        edits[location->uri].push_back(make_unique<TextEdit>(move(location->range), absl::StrJoin(strs, "::")));
     }
 
-    // showFullName contains full :: name.
-    symbol.data(*gs)->name.toString(*gs);
-    symbol.data(*gs)->toString(*gs);
+    vector<unique_ptr<TextDocumentEdit>> textDocEdits;
+    for (auto &item : edits) {
+        // TODO: Version.
+        textDocEdits.push_back(make_unique<TextDocumentEdit>(
+            make_unique<VersionedTextDocumentIdentifier>(item.first, JSONNullObject()), move(item.second)));
+    }
+    we->documentChanges = move(textDocEdits);
 
-    return LSPWorkspaceEdit{move(gs), move(we)};
+    return make_pair(move(gs), move(we));
 }
 
 std::optional<std::string> validateName(std::string_view name) {
@@ -62,14 +94,10 @@ LSPResult LSPLoop::handleTextDocumentRename(unique_ptr<core::GlobalState> gs, co
             auto resp = move(queryResponses[0]);
             // Only supports rename requests from constants and class definitions.
             if (auto constResp = resp->isConstant()) {
-                auto result = getRenameEdits(move(gs), constResp->symbol);
-                gs = move(result.gs);
-                response->result = move(result.edit);
+                tie(gs, response->result) = getRenameEdits(move(gs), constResp->symbol, params.newName);
             } else if (auto defResp = resp->isDefinition()) {
                 if (defResp->symbol.data(*gs)->isClass()) {
-                    auto result = getRenameEdits(move(gs), defResp->symbol);
-                    gs = move(result.gs);
-                    response->result = move(result.edit);
+                    tie(gs, response->result) = getRenameEdits(move(gs), defResp->symbol, params.newName);
                 }
             }
         }

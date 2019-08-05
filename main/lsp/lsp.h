@@ -49,16 +49,6 @@ struct LSPResult {
     static LSPResult make(std::unique_ptr<core::GlobalState> gs, std::unique_ptr<ResponseMessage> response);
 };
 
-struct LSPLocResult {
-    std::unique_ptr<core::GlobalState> gs;
-    std::vector<core::Loc> locs;
-};
-
-struct LSPWorkspaceEdit {
-    std::unique_ptr<core::GlobalState> gs;
-    std::unique_ptr<WorkspaceEdit> edit;
-};
-
 class LSPLoop {
     friend class LSPWrapper;
 
@@ -161,12 +151,12 @@ class LSPLoop {
     /* Send the given message to client */
     void sendMessage(const LSPMessage &msg);
 
-    std::vector<std::unique_ptr<Location>> locs2Locations(const core::GlobalState &gs, std::vector<core::Loc> loc,
-                                                          std::vector<std::unique_ptr<Location>> = {});
     std::unique_ptr<Location> loc2Location(const core::GlobalState &gs, core::Loc loc);
-    std::vector<core::Loc> extractLocs(const core::GlobalState &gs,
-                                       const std::vector<std::unique_ptr<core::lsp::QueryResponse>> &queryResponses,
-                                       std::vector<core::Loc> locations = {});
+    void addLocIfExists(const core::GlobalState &gs, std::vector<std::unique_ptr<Location>> &locs, core::Loc loc);
+    std::vector<std::unique_ptr<Location>>
+    extractLocations(const core::GlobalState &gs,
+                     const std::vector<std::unique_ptr<core::lsp::QueryResponse>> &queryResponses,
+                     std::vector<std::unique_ptr<Location>> locations = {});
 
     core::FileRef updateFile(const std::shared_ptr<core::File> &file);
     /** Invalidate all currently cached trees and re-index them from file system.
@@ -218,12 +208,15 @@ class LSPLoop {
                                                const DocumentSymbolParams &params);
     LSPResult handleWorkspaceSymbols(std::unique_ptr<core::GlobalState> gs, const MessageId &id,
                                      const WorkspaceSymbolParams &params);
-    LSPResult handleTextDocumentPrepareRename(std::unique_ptr<core::GlobalState> gs, const MessageId &id,
-                                              const TextDocumentPositionParams &params);
-    LSPLocResult getReferencesToSymbol(std::unique_ptr<core::GlobalState> gs, core::SymbolRef symbol);
+    std::pair<std::unique_ptr<core::GlobalState>, std::vector<std::unique_ptr<Location>>>
+    getReferencesToSymbol(std::unique_ptr<core::GlobalState> gs, core::SymbolRef symbol,
+                          std::vector<std::unique_ptr<Location>> locations = {});
     LSPResult handleTextDocumentReferences(std::unique_ptr<core::GlobalState> gs, const MessageId &id,
                                            const ReferenceParams &params);
-    LSPWorkspaceEdit getRenameEdits(std::unique_ptr<core::GlobalState> gs, core::SymbolRef symbol);
+    LSPResult handleTextDocumentPrepareRename(std::unique_ptr<core::GlobalState> gs, const MessageId &id,
+                                              const TextDocumentPositionParams &params);
+    std::pair<std::unique_ptr<core::GlobalState>, std::unique_ptr<WorkspaceEdit>>
+    getRenameEdits(std::unique_ptr<core::GlobalState> gs, core::SymbolRef symbol, std::string_view newName);
     LSPResult handleTextDocumentRename(std::unique_ptr<core::GlobalState> gs, const MessageId &id,
                                        const RenameParams &params);
     LSPResult handleTextDocumentDefinition(std::unique_ptr<core::GlobalState> gs, const MessageId &id,

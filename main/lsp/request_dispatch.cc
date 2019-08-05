@@ -194,6 +194,10 @@ LSPResult LSPLoop::processRequestInternal(unique_ptr<core::GlobalState> gs, cons
                 serverCap->completionProvider = move(completionProvider);
             }
 
+            if (opts.lspRenameEnabled) {
+                serverCap->renameProvider = make_unique<RenameOptions>(true);
+            }
+
             response->result = make_unique<InitializeResult>(move(serverCap));
             return LSPResult::make(move(gs), move(response));
         } else if (method == LSPMethod::TextDocumentDocumentSymbol) {
