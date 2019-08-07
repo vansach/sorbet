@@ -77,19 +77,29 @@ LSPLoop::TypecheckRun LSPLoop::setupLSPQueryBySymbol(unique_ptr<core::GlobalStat
     ENFORCE(sym.exists());
     vector<core::FileRef> frefs;
     const core::NameHash symNameHash(*gs, sym.data(*gs)->name.data(*gs));
-    // Locate files that contain the same Name as the symbol. Is an overapproximation, but a good first filter.
-    int i = -1;
-    for (auto &hash : globalStateHashes) {
-        i++;
-        const auto &usedSends = hash.usages.sends;
-        const auto &usedConstants = hash.usages.constants;
-        auto ref = core::FileRef(i);
+    if (!disableFastPath) {
+        // Locate files that contain the same Name as the symbol. Is an overapproximation, but a good first filter.
+        int i = -1;
+        for (auto &hash : globalStateHashes) {
+            i++;
+            const auto &usedSends = hash.usages.sends;
+            const auto &usedConstants = hash.usages.constants;
+            auto ref = core::FileRef(i);
 
-        const bool fileIsValid = ref.exists() && ref.data(*gs).sourceType == core::File::Type::Normal;
-        if (fileIsValid &&
-            (std::find(usedSends.begin(), usedSends.end(), symNameHash) != usedSends.end() ||
-             std::find(usedConstants.begin(), usedConstants.end(), symNameHash) != usedConstants.end())) {
-            frefs.emplace_back(ref);
+            const bool fileIsValid = ref.exists() && ref.data(*gs).sourceType == core::File::Type::Normal;
+            if (fileIsValid &&
+                (std::find(usedSends.begin(), usedSends.end(), symNameHash) != usedSends.end() ||
+                 std::find(usedConstants.begin(), usedConstants.end(), symNameHash) != usedConstants.end())) {
+                frefs.emplace_back(ref);
+            }
+        }
+    } else {
+        const int numFiles = gs->getFiles().size();
+        for (int i = 0; i < numFiles; i++) {
+            auto ref = core::FileRef(i);
+            if (ref.exists() && ref.data(*gs).sourceType == core::File::Type::Normal) {
+                frefs.emplace_back(ref);
+            }
         }
     }
 
