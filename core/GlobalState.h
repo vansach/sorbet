@@ -82,6 +82,9 @@ public:
     SymbolRef lookupStaticFieldSymbol(SymbolRef owner, NameRef name) {
         return lookupSymbolWithFlags(owner, name, Symbol::Flags::STATIC_FIELD);
     }
+    SymbolRef lookupTypeArgumentSymbol(SymbolRef owner, NameRef name) {
+        return lookupSymbolWithFlags(owner, name, Symbol::Flags::TYPE_ARGUMENT);
+    }
 
     SymbolRef staticInitForFile(Loc loc);
     SymbolRef staticInitForClass(SymbolRef klass, Loc loc);

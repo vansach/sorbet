@@ -781,15 +781,22 @@ public:
             }
             return make_unique<ast::EmptyTree>();
         }
-        auto oldSym = onSymbol.data(ctx)->findMemberNoDealias(ctx, typeName->cnst);
-        if (oldSym.exists() && !(oldSym.data(ctx)->loc() == asgn->loc || oldSym.data(ctx)->loc().isTombStoned(ctx))) {
+        auto oldSym = ctx.state.lookupTypeArgumentSymbol(onSymbol, typeName->cnst);
+        auto existing = ctx.state.lookupSymbol(onSymbol, typeName->cnst);
+        if (existing.exists() && existing != oldSym) {
             if (auto e = ctx.state.beginError(typeName->loc, core::errors::Namer::InvalidTypeDefinition)) {
-                e.setHeader("Redefining constant `{}`", oldSym.data(ctx)->show(ctx));
-                e.addErrorLine(oldSym.data(ctx)->loc(), "Previous definition");
+                e.setHeader("Redefining constant `{}`", existing.data(ctx)->show(ctx));
+                e.addErrorLine(existing.data(ctx)->loc(), "Previous definition");
             }
-            ctx.state.mangleRenameSymbol(oldSym, oldSym.data(ctx)->name);
+            ctx.state.mangleRenameSymbol(existing, existing.data(ctx)->name);
         }
-        auto sym = ctx.state.enterTypeMember(asgn->loc, onSymbol, typeName->cnst, variance);
+        core::NameRef symName;
+        if (oldSym.exists()) {
+            symName = oldSym.data(ctx)->name;
+        } else {
+            symName = typeName->cnst;
+        }
+        auto sym = ctx.state.enterTypeMember(asgn->loc, onSymbol, symName, variance);
 
         // Ensure that every type member has a LambdaParam with bounds, but give
         // both bounds as T.untyped. The reason for this is that the bounds will
