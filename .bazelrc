@@ -71,6 +71,8 @@ build:release-common --config=versioned
 # harden: mark relocation sections read-only
 build:release-linux --linkopt=-Wl,-z,relro,-z,now
 build:release-linux --config=lto-linux --config=release-common
+build:release-linux --config=sanitize-linux
+build:release-linux --define jemalloc=false
 
 build:release-mac --config=release-common
 
@@ -83,8 +85,6 @@ build:release-debug-mac --config=forcedebug
 build:release-debug-mac --config=dbg
 
 build:release-sanitized-linux --copt=-O2
-build:release-sanitized-linux --config=sanitize-linux
-build:release-sanitized-linux --define jemalloc=false
 build:release-sanitized-linux --config=debugsymbols
 build:release-sanitized-linux --config=forcedebug
 
