@@ -40,9 +40,12 @@ if [ -f "$done_file" ]; then
   echo "$crasher: already minimized"
   if "./bazel-bin/test/fuzz/$target" "$done_file" "$@"; then
     echo "$crasher: already fixed"
-    mv "$done_file" "fuzz_crashers/fixed/min/$crasher_name"
-    if [ -f "$output_file" ]; then
+    mv "$done_file" "fuzz_crashers/fixed/min/$crasher_name.done"
+    if [ -f "$crasher" ]; then
       mv "$crasher" "fuzz_crashers/fixed/original/$crasher_name"
+    fi
+    if [ -f "$output_file" ]; then
+      rm "$output_file"
     fi
   fi
   exit
