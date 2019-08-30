@@ -41,6 +41,9 @@ if [ -f "$done_file" ]; then
   if "./bazel-bin/test/fuzz/$target" "$done_file" "$@"; then
     echo "$crasher: already fixed"
     mv "$done_file" "fuzz_crashers/fixed/min/$crasher_name"
+    if [ -f "$output_file" ]; then
+      mv "$crasher" "fuzz_crashers/fixed/original/$crasher_name"
+    fi
   fi
   exit
 fi
@@ -54,6 +57,9 @@ fi
 if "./bazel-bin/test/fuzz/$target" "$crasher" "$@"; then
   echo "$crasher: already fixed"
   mv "$crasher" "fuzz_crashers/fixed/original/$crasher_name"
+  if [ -f "$output_file" ]; then
+    rm "$output_file"
+  fi
   exit
 fi
 
