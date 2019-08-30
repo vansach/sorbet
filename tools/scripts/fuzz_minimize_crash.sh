@@ -38,7 +38,7 @@ done_file="$output_file.done"
 
 if [ -f "$done_file" ]; then
   echo "$crasher: already minimized"
-  if "./bazel-bin/test/fuzz/$target" "$done_file"; then
+  if "./bazel-bin/test/fuzz/$target" "$done_file" "$@"; then
     echo "$crasher: already fixed"
     mv "$done_file" "fuzz_crashers/fixed/min/$crasher_name"
   fi
