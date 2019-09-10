@@ -181,7 +181,7 @@ TypePtr Types::dropSubtypesOf(Context ctx, const TypePtr &from, SymbolRef klass)
                 ENFORCE(!Types::equiv(ctx, subclasses, from), "sealedSubclassesToUnion about to cause infinte loop");
                 auto temp = dropSubtypesOf(ctx, subclasses, klass);
                 if (temp != subclasses) {
-                    result = move(temp)
+                    result = move(temp);
                 } else {
                     result = from;
                 }
