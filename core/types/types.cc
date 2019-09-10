@@ -179,7 +179,12 @@ TypePtr Types::dropSubtypesOf(Context ctx, const TypePtr &from, SymbolRef klass)
                        (cdata->isClassOrModuleAbstract() || cdata->isClassOrModuleModule())) {
                 auto subclasses = cdata->sealedSubclassesToUnion(ctx);
                 ENFORCE(!Types::equiv(ctx, subclasses, from), "sealedSubclassesToUnion about to cause infinte loop");
-                result = dropSubtypesOf(ctx, subclasses, klass);
+                auto temp = dropSubtypesOf(ctx, subclasses, klass);
+                if (temp != subclasses) {
+                    result = move(temp)
+                } else {
+                    result = from;
+                }
             } else if (c->symbol == klass || c->derivesFrom(ctx, klass)) {
                 result = Types::bottom();
             } else {
