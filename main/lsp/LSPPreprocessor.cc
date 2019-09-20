@@ -104,6 +104,7 @@ void cancelRequest(std::deque<std::unique_ptr<LSPMessage>> &pendingRequests, con
 unique_ptr<core::GlobalState> LSPPreprocessor::getTypecheckingGS() const {
     auto finalGS = ttgs.getGlobalState().deepCopy();
     finalGS->errorQueue = finalGSErrorQueue;
+    finalGS->printSizeInfo(*logger);
     return finalGS;
 }
 

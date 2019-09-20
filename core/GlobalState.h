@@ -207,6 +207,8 @@ public:
 
     std::vector<std::unique_ptr<pipeline::semantic_extension::SemanticExtension>> semanticExtensions;
 
+    void printSizeInfo(spdlog::logger &logger) const;
+
 private:
     bool shouldReportErrorOn(Loc loc, ErrorClass what) const;
     struct DeepCloneHistoryEntry {

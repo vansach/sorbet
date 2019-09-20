@@ -61,6 +61,15 @@ GlobalState::GlobalState(shared_ptr<ErrorQueue> errorQueue)
     ENFORCE((namesByHashSize & (namesByHashSize - 1)) == 0, "namesByHashSize is not a power of 2");
 }
 
+void GlobalState::printSizeInfo(spdlog::logger &logger) const {
+    logger.error("Names: {} / {}", names.size(), names.capacity());
+    logger.error("NameSize: {}", sizeof(Name));
+    logger.error("Symbol: {} / {}", symbols.size(), symbols.capacity());
+    logger.error("SymbolSize: {}", sizeof(Symbol));
+    logger.error("NamesByHash: {} / {}", namesByHash.size(), namesByHash.capacity());
+    logger.error("NamesByHash Size: {}", sizeof(std::pair<unsigned int, unsigned int>));
+}
+
 void GlobalState::initEmpty() {
     UnfreezeFileTable fileTableAccess(*this);
     UnfreezeNameTable nameTableAccess(*this);
