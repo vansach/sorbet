@@ -521,6 +521,32 @@ module Opus::Types::Test
       end
     end
 
+    describe 'TypeAlias' do
+      it 'delegates name' do
+        type = T.type_alias {T.any(Integer, String)}
+        assert_equal('T.any(Integer, String)', type.name)
+      end
+
+      it 'passes a validation' do
+        type = T.type_alias {T.any(Integer, String)}
+        msg = type.error_message_for_obj(1)
+        assert_nil(msg)
+      end
+
+      it 'provides errors on failed validation' do
+        type = T.type_alias {T.any(Integer, String)}
+        msg = type.error_message_for_obj(true)
+        assert_equal('Expected type T.any(Integer, String), got type TrueClass', msg)
+      end
+
+      it 'defers block evaluation' do
+        crash_type = T.type_alias {raise 'crash'}
+        assert_raises(RuntimeError) do
+          crash_type.error_message_for_obj(1)
+        end
+      end
+    end
+
     module TestInterface1
       extend T::Sig
       extend T::Helpers
