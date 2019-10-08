@@ -55,7 +55,7 @@ module T
   def self.reveal_type(value); end
   def self.type_parameter(name); end
   def self.self_type; end
-  def self.type_alias(type); end
+  def self.type_alias(&blk); end
 
   sig {params(arg: T.untyped).returns(T.untyped)}
   def self.must(arg); end
@@ -111,7 +111,7 @@ end
 module T::CFGExport
 end
 
-T::Boolean = T.type_alias(T.any(TrueClass, FalseClass))
+T::Boolean = T.type_alias {T.any(TrueClass, FalseClass)}
 
 module T::Configuration
   def self.call_validation_error_handler(signature, opts); end
