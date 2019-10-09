@@ -19,13 +19,7 @@ module T::Private::Types
       aliased_type.valid?(obj)
     end
 
-    # @override Base
-    private def subtype_of_single?(other)
-      # TODO
-      aliased_type.send(:subtype_of_single?, other)
-    end
-
-    private def aliased_type
+    def aliased_type
       @aliased_type ||= T::Utils.coerce(@callable.call)
     end
   end
