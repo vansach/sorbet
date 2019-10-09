@@ -41,6 +41,14 @@ module T::Types
     def subtype_of?(t2)
       t1 = self
 
+      if t2.is_a?(T::Private::Types::TypeAlias)
+        t2 = t2.aliased_type
+      end
+
+      if t1.is_a?(T::Private::Types::TypeAlias)
+        return t1.aliased_type.subtype_of?(t2)
+      end
+
       # pairs to cover: 1  (_, _)
       #                 2  (_, And)
       #                 3  (_, Or)
@@ -84,10 +92,6 @@ module T::Types
 
       if t1.is_a?(T::Types::Untyped) || t2.is_a?(T::Types::Untyped)
         return true
-      end
-
-      if t1.is_a?(T::Private::Types::TypeAlias)
-        return t1.aliased_type.subtype_of?(t2)
       end
 
       # Rest of (1)
