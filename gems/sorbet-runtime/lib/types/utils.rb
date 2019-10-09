@@ -76,6 +76,16 @@ module T::Utils
     T::Private::Methods.run_all_sig_blocks
   end
 
+  # Return the underlying type for a type alias. Otherwise returns type.
+  def self.resolve_alias(type)
+    case type
+    when T::Private::Types::TypeAlias
+      type.aliased_type
+    else
+      type
+    end
+  end
+
   # Give a type which is a subclass of T::Types::Base, determines if the type is a simple nilable type (union of NilClass and something else).
   # If so, returns the T::Types::Base of the something else. Otherwise, returns nil.
   def self.unwrap_nilable(type)
