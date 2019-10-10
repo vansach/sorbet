@@ -528,6 +528,14 @@ module Opus::Types::Test
         assert_equal('T.any(Integer, String)', type.name)
       end
 
+      it 'delegates equality' do
+        assert(T.any(Integer, String) == T.type_alias {T.any(Integer, String)})
+        assert(T.type_alias {T.any(Integer, String)} == T.any(Integer, String))
+        assert(T.type_alias {T.any(Integer, String)} == T.type_alias {T.any(Integer, String)})
+
+        refute(T.type_alias {T.any(Integer, Float)} == T.type_alias {T.any(Integer, String)})
+      end
+
       it 'passes a validation' do
         type = T.type_alias {T.any(Integer, String)}
         msg = type.error_message_for_obj(1)
