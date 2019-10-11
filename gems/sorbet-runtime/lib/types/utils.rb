@@ -4,7 +4,9 @@
 module T::Utils
   # Used to convert from a type specification to a `T::Types::Base`.
   def self.coerce(val)
-    if val.is_a?(T::Types::Base)
+    if val.is_a?(T::Private::Types::TypeAlias)
+      val.aliased_type
+    elsif val.is_a?(T::Types::Base)
       val
     elsif val == ::Array
       T::Array[T.untyped]
