@@ -781,9 +781,10 @@ core::TypePtr Environment::processBinding(core::Context ctx, cfg::Binding &bind,
                 };
                 core::DispatchArgs dispatchArgs{send->fun, locs, args, recvType.type, recvType.type, send->link};
                 auto dispatched = recvType.type->dispatchCall(ctx, dispatchArgs);
-
                 auto it = &dispatched;
                 while (it != nullptr) {
+                    fmt::print("DISPATCH-RESULT: {}.{}\n", it->main.receiver->show(ctx),
+                               send->fun.data(ctx)->shortName(ctx));
                     for (auto &err : it->main.errors) {
                         ctx.state._error(std::move(err));
                     }
