@@ -6,8 +6,11 @@
 
 template struct std::pair<sorbet::core::LocalVariable, std::shared_ptr<sorbet::core::Type>>;
 
-using namespace std;
+namespace sorbet::realmain::lsp {
+std::optional<std::string> findDocumentation(std::string_view sourceCode, int beginIndex);
+};
 
+using namespace std;
 namespace sorbet::infer {
 
 core::TypePtr dropConstructor(core::Context ctx, core::Loc loc, core::TypePtr tp) {
@@ -783,8 +786,13 @@ core::TypePtr Environment::processBinding(core::Context ctx, cfg::Binding &bind,
                 auto dispatched = recvType.type->dispatchCall(ctx, dispatchArgs);
                 auto it = &dispatched;
                 while (it != nullptr) {
-                    fmt::print("DISPATCH-RESULT: {}.{}\n", it->main.receiver->show(ctx),
-                               send->fun.data(ctx)->shortName(ctx));
+                    auto loc = it->main.method.data(ctx)->loc();
+                    if (loc.exists()) {
+                        if (!realmain::lsp::findDocumentation(loc.file().data(ctx).source(), loc.beginPos())) {
+                            fmt::print("DISPATCH-WITHOUT-DOCS: {}.{}\n", it->main.receiver->show(ctx),
+                                       send->fun.data(ctx)->shortName(ctx));
+                        }
+                    }
                     for (auto &err : it->main.errors) {
                         ctx.state._error(std::move(err));
                     }
