@@ -7,7 +7,8 @@
 template struct std::pair<sorbet::core::LocalVariable, std::shared_ptr<sorbet::core::Type>>;
 
 namespace sorbet::realmain::lsp {
-std::optional<std::string> findDocumentation(std::string_view sourceCode, int beginIndex) __attribute__((weak)) {
+std::optional<std::string> findDocumentation(std::string_view sourceCode, int beginIndex) __attribute__((weak));
+std::optional<std::string> findDocumentation(std::string_view sourceCode, int beginIndex) {
     return std::nullopt;
 };
 }; // namespace sorbet::realmain::lsp
