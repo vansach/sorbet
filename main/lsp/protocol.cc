@@ -185,8 +185,6 @@ optional<unique_ptr<core::GlobalState>> LSPLoop::runLSP(int inputFd) {
     absl::Mutex processingMtx;
     QueueState processingQueue;
 
-    auto typecheckThread = typecheckerCoord.startTypecheckerThread();
-
     unique_ptr<watchman::WatchmanProcess> watchmanProcess;
     const auto &opts = config->opts;
     auto &logger = config->logger;
@@ -259,6 +257,9 @@ optional<unique_ptr<core::GlobalState>> LSPLoop::runLSP(int inputFd) {
 
     // Bridges the gap between the {reader, watchman} threads and the typechecking thread.
     auto preprocessingThread = preprocessor.runPreprocessor(incomingQueue, incomingMtx, processingQueue, processingMtx);
+
+    // Start this thread last, as we need to explicitly call `.shutdown()` on typecheckerCoord to end it.
+    auto typecheckThread = typecheckerCoord.startTypecheckerThread();
 
     mainThreadId = this_thread::get_id();
     {

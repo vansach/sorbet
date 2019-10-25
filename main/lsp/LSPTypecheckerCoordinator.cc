@@ -17,10 +17,18 @@ void LSPTypecheckerCoordinator::asyncRunInternal(function<void()> &&lambda) {
 }
 
 void LSPTypecheckerCoordinator::asyncRun(function<void(LSPTypechecker &)> &&lambda) {
+    if (shouldTerminate) {
+        Exception::raise("Cannot run lambda: Typechecker is terminating.");
+    }
+
     asyncRunInternal([&typechecker = this->typechecker, lambda]() -> void { lambda(typechecker); });
 }
 
 void LSPTypecheckerCoordinator::syncRun(function<void(LSPTypechecker &)> &&lambda) {
+    if (shouldTerminate) {
+        Exception::raise("Cannot run lambda: Typechecker is terminating.");
+    }
+
     absl::Notification notification;
     CounterState typecheckerCounters;
     // If typechecker is running on a dedicated thread, then we need to merge its metrics w/ coordinator thread's so we
