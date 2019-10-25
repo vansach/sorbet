@@ -13,7 +13,7 @@ class LSPTypecheckerCoordinator final {
     /** Contains a queue of functions to run on the typechecking thread. */
     BlockingUnBoundedQueue<std::function<void()>> lambdas;
     /** If 'true', the coordinator should terminate immediately. */
-    bool shouldTerminate;
+    std::atomic<bool> shouldTerminate;
     /** LSPTypecheckerCoordinator delegates typechecking operations to LSPTypechecker. */
     LSPTypechecker typechecker;
     std::shared_ptr<const LSPConfiguration> config;

@@ -17,7 +17,7 @@ void LSPTypecheckerCoordinator::asyncRunInternal(function<void()> &&lambda) {
 }
 
 void LSPTypecheckerCoordinator::asyncRun(function<void(LSPTypechecker &)> &&lambda) {
-    if (shouldTerminate) {
+    if (shouldTerminate.load()) {
         Exception::raise("Cannot run lambda: Typechecker is terminating.");
     }
 
@@ -25,7 +25,7 @@ void LSPTypecheckerCoordinator::asyncRun(function<void(LSPTypechecker &)> &&lamb
 }
 
 void LSPTypecheckerCoordinator::syncRun(function<void(LSPTypechecker &)> &&lambda) {
-    if (shouldTerminate) {
+    if (shouldTerminate.load()) {
         Exception::raise("Cannot run lambda: Typechecker is terminating.");
     }
 
@@ -52,7 +52,7 @@ void LSPTypecheckerCoordinator::syncRun(function<void(LSPTypechecker &)> &&lambd
 unique_ptr<core::GlobalState> LSPTypecheckerCoordinator::shutdown() {
     unique_ptr<core::GlobalState> gs;
     syncRun([&](auto &typechecker) -> void {
-        shouldTerminate = true;
+        shouldTerminate.store(true);
         gs = typechecker.destroy();
     });
     return gs;
@@ -67,7 +67,7 @@ unique_ptr<Joinable> LSPTypecheckerCoordinator::startTypecheckerThread() {
     return runInAThread("Typechecker", [&]() -> void {
         typechecker.changeThread();
 
-        while (!shouldTerminate) {
+        while (!shouldTerminate.load()) {
             function<void()> lambda;
             auto result = lambdas.wait_pop_timed(lambda, WorkerPool::BLOCK_INTERVAL(), *config->logger);
             if (result.gotItem()) {
