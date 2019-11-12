@@ -63,6 +63,12 @@ class LSPLoop {
                      const std::vector<std::unique_ptr<core::lsp::QueryResponse>> &queryResponses,
                      std::vector<std::unique_ptr<Location>> locations = {}) const;
 
+    // extractHighlightLocations differs because it will use heuristics to determine an exact location.
+    std::vector<std::unique_ptr<Location>>
+    extractHighlightLocations(const core::GlobalState &gs,
+                              const std::vector<std::unique_ptr<core::lsp::QueryResponse>> &queryResponses,
+                              std::vector<std::unique_ptr<Location>> locations = {}) const;
+
     LSPQueryResult queryByLoc(LSPTypechecker &typechecker, std::string_view uri, const Position &pos,
                               const LSPMethod forMethod, bool errorIfFileIsUntyped = true) const;
     LSPQueryResult queryBySymbol(LSPTypechecker &typechecker, core::SymbolRef symbol,
