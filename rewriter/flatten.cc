@@ -111,7 +111,7 @@ class FlattenWalk {
 
         // push a method scope, possibly noting whether
         void pushScope(ScopeInfo info) {
-            if (stack.size() == 0 || stack.back().scopeInfo.scopeType == ScopeType::ClassScope) {
+            if (!stack.empty() && stack.back().scopeInfo.scopeType == ScopeType::ClassScope) {
                 // we're at the top level of a class, not nested inside a method, which means we don't need to move
                 // anything: we'll add to the stack but don't need to allocate space on the move queue
                 stack.emplace_back(std::nullopt, info);
