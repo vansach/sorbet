@@ -1,10 +1,6 @@
 begin
   <emptyTree>
   class <emptyTree><<C <root>>> < ()
-    <emptyTree>
-
-    <emptyTree>
-
     def main(<blk>)
       begin
         <self>.puts(::A.a())
@@ -56,6 +52,7 @@ begin
           ::Sorbet::Private::Static.keep_for_ide(::H)
           <emptyTree>
         end
+        :"main"
         <self>.main()
         <emptyTree>
       end
@@ -75,10 +72,6 @@ begin
     end
   end
   class <singleton class><<Class:B>> < ()
-    <emptyTree>
-
-    <emptyTree>
-
     def b(<blk>)
       "b"
     end
@@ -104,10 +97,6 @@ begin
     end
   end
   class <singleton class><<Class:<Class:D>>> < ()
-    <emptyTree>
-
-    <emptyTree>
-
     def d(<blk>)
       "d"
     end
@@ -117,10 +106,6 @@ begin
     end
   end
   class ::E<<C E>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
     def self.e(<blk>)
       "e"
     end
@@ -137,10 +122,6 @@ begin
     end
   end
   class <singleton class><<Class:E>> < ()
-    <emptyTree>
-
-    <emptyTree>
-
     def wrapper(<blk>)
       :"e"
     end
@@ -158,12 +139,6 @@ begin
     end
   end
   class <singleton class><<Class:F>> < ()
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
     def initialize(<blk>)
       @f = begin
         ::Sorbet::Private::Static.keep_for_typechecking(::Integer)
@@ -186,31 +161,28 @@ begin
     end
   end
   class ::G<<C G>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
     def wrapper(<blk>)
       begin
         <self>.inner()
       end
     end
 
-    def self.g(<blk>)
-      "g"
-    end
-
     def inner(<blk>)
       ::T.reveal_type(<self>)
     end
 
+    def self.g(<blk>)
+      "g"
+    end
+
     def self.<static-init>(<blk>)
       begin
-        <emptyTree>
+        begin
+          <emptyTree>
+          <emptyTree>
+        end
+        :"wrapper"
+        :"g"
         <emptyTree>
       end
     end
@@ -238,16 +210,12 @@ begin
     end
   end
   class ::<Class:H>::H2<<C H2>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
     def self.h(<blk>)
       "h"
     end
 
     def self.<static-init>(<blk>)
-      <emptyTree>
+      :"h"
     end
   end
   <emptyTree>

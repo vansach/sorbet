@@ -1,10 +1,6 @@
 begin
   <emptyTree>
   class <emptyTree><<C <root>>> < ()
-    <emptyTree>
-
-    <emptyTree>
-
     def main(<blk>)
       begin
         <self>.puts(::A.newer())
@@ -36,6 +32,7 @@ begin
           ::Sorbet::Private::Static.keep_for_ide(::A)
           <emptyTree>
         end
+        :"main"
         <self>.main()
         <emptyTree>
       end
@@ -56,10 +53,6 @@ begin
     end
   end
   class <singleton class><<Class:A>> < (::MM)
-    <emptyTree>
-
-    <emptyTree>
-
     def newer(<blk>)
       <self>.new()
     end
@@ -69,16 +62,16 @@ begin
     end
   end
   class ::B<<C B>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
     def self.newer(<blk>)
       <self>.new()
     end
 
     def self.<static-init>(<blk>)
-      ::Sorbet::Private::Static.keep_for_ide(::MM)
+      begin
+        :"newer"
+        ::Sorbet::Private::Static.keep_for_ide(::MM)
+        <emptyTree>
+      end
     end
   end
   class ::C<<C C>> < (::A)
@@ -90,10 +83,6 @@ begin
     end
   end
   class <singleton class><<Class:C>> < ()
-    <emptyTree>
-
-    <emptyTree>
-
     def newerer(<blk>)
       <self>.newer()
     end

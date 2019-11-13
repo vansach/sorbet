@@ -44,12 +44,6 @@ begin
     end
   end
   class ::NormalClass<<C NormalClass>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
     def normal_method(<blk>)
       <emptyTree>
     end
@@ -60,6 +54,8 @@ begin
 
     def self.<static-init>(<blk>)
       begin
+        :"normal_method"
+        :"normal_static_method"
         begin
           <emptyTree>
           ::Sorbet::Private::Static.keep_for_ide(::NormalClass::InnerClass)

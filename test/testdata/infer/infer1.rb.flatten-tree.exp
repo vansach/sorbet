@@ -1,24 +1,6 @@
 begin
   <emptyTree>
   class <emptyTree><<C <root>>> < ()
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
     def baz1(<blk>)
       begin
         a = "foo"
@@ -81,7 +63,17 @@ begin
     end
 
     def self.<static-init><<static-init>$CENSORED>(<blk>)
-      <emptyTree>
+      begin
+        :"baz1"
+        :"baz2"
+        :"baz3"
+        :"baz4"
+        :"baz5"
+        :"baz6"
+        :"baz7"
+        :"baz8"
+        <emptyTree>
+      end
     end
   end
   <emptyTree>

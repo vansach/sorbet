@@ -658,7 +658,7 @@
     },
     {
      "bind": {
-      "unique_name": "\u003cstatTemp\u003e$24",
+      "unique_name": "\u003cstatTemp\u003e$25",
       "type": {
        "kind": "APPLIED",
        "applied": {
@@ -686,7 +686,7 @@
     },
     {
      "bind": {
-      "unique_name": "\u003cstatTemp\u003e$25",
+      "unique_name": "\u003cstatTemp\u003e$26",
       "type": {
        "kind": "APPLIED",
        "applied": {
@@ -720,7 +720,7 @@
     },
     {
      "bind": {
-      "unique_name": "keep_for_ide$26",
+      "unique_name": "keep_for_ide$27",
       "type": {
        "kind": "APPLIED",
        "applied": {
@@ -754,7 +754,7 @@
     },
     {
      "bind": {
-      "unique_name": "\u003cstatTemp\u003e$23",
+      "unique_name": "\u003cstatTemp\u003e$24",
       "type": {
        "kind": "CLASS",
        "class_full_name": "Sorbet::Private::Static::Void"
@@ -764,7 +764,7 @@
       "kind": "SEND",
       "send": {
        "receiver": {
-        "unique_name": "\u003cstatTemp\u003e$24",
+        "unique_name": "\u003cstatTemp\u003e$25",
         "type": {
          "kind": "APPLIED",
          "applied": {
@@ -781,7 +781,7 @@
        "method": "keep_for_ide",
        "arguments": [
         {
-         "unique_name": "\u003cstatTemp\u003e$25",
+         "unique_name": "\u003cstatTemp\u003e$26",
          "type": {
           "kind": "APPLIED",
           "applied": {
@@ -808,7 +808,7 @@
     },
     {
      "bind": {
-      "unique_name": "\u003cstatTemp\u003e$28",
+      "unique_name": "\u003cstatTemp\u003e$29",
       "type": {
        "kind": "APPLIED",
        "applied": {
@@ -836,7 +836,7 @@
     },
     {
      "bind": {
-      "unique_name": "\u003cstatTemp\u003e$29",
+      "unique_name": "\u003cstatTemp\u003e$30",
       "type": {
        "kind": "APPLIED",
        "applied": {
@@ -870,7 +870,7 @@
     },
     {
      "bind": {
-      "unique_name": "keep_for_ide$30",
+      "unique_name": "keep_for_ide$31",
       "type": {
        "kind": "APPLIED",
        "applied": {
@@ -904,7 +904,7 @@
     },
     {
      "bind": {
-      "unique_name": "\u003cstatTemp\u003e$27",
+      "unique_name": "\u003cstatTemp\u003e$28",
       "type": {
        "kind": "CLASS",
        "class_full_name": "Sorbet::Private::Static::Void"
@@ -914,7 +914,7 @@
       "kind": "SEND",
       "send": {
        "receiver": {
-        "unique_name": "\u003cstatTemp\u003e$28",
+        "unique_name": "\u003cstatTemp\u003e$29",
         "type": {
          "kind": "APPLIED",
          "applied": {
@@ -931,7 +931,7 @@
        "method": "keep_for_ide",
        "arguments": [
         {
-         "unique_name": "\u003cstatTemp\u003e$29",
+         "unique_name": "\u003cstatTemp\u003e$30",
          "type": {
           "kind": "APPLIED",
           "applied": {

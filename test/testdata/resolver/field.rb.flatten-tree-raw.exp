@@ -6,10 +6,6 @@ InsSeq{
       name = EmptyTree<<C <U <root>>>>
       ancestors = []
       rhs = [
-        EmptyTree
-
-        EmptyTree
-
         MethodDef{
           flags = 0
           name = <U foo><<U foo>>
@@ -35,7 +31,7 @@ InsSeq{
           args = [Local{
               localVariable = <U <blk>>
             }]
-          rhs = EmptyTree
+          rhs = Literal{ value = :"foo" }
         }
       ]
     }

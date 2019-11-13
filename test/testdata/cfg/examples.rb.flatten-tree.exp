@@ -10,24 +10,6 @@ begin
     end
   end
   class ::Examples<<C Examples>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
     def i_like_ifs(<blk>)
       if true
         return 1
@@ -116,7 +98,17 @@ begin
     end
 
     def self.<static-init>(<blk>)
-      <emptyTree>
+      begin
+        :"i_like_ifs"
+        :"i_like_exps"
+        :"return_in_one_branch1"
+        :"return_in_one_branch2"
+        :"variables"
+        :"variables_and_loop"
+        :"variables_loop_if"
+        :"take_arguments"
+        <emptyTree>
+      end
     end
   end
   <emptyTree>

@@ -10,10 +10,6 @@ begin
     end
   end
   class ::Destructure<<C Destructure>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
     def f((x,y), z, <blk>)
       begin
         begin
@@ -42,7 +38,7 @@ begin
     end
 
     def self.<static-init>(<blk>)
-      <emptyTree>
+      :"f"
     end
   end
   <emptyTree>

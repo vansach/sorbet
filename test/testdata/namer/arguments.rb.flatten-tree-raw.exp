@@ -52,14 +52,6 @@ InsSeq{
           symbol = ::<todo sym>
         }]
       rhs = [
-        EmptyTree
-
-        EmptyTree
-
-        EmptyTree
-
-        EmptyTree
-
         MethodDef{
           flags = 0
           name = <U take_arguments><<U take_arguments>>
@@ -251,7 +243,14 @@ InsSeq{
           args = [Local{
               localVariable = <U <blk>>
             }]
-          rhs = EmptyTree
+          rhs = InsSeq{
+            stats = [
+              Literal{ value = :"take_arguments" }
+              Literal{ value = :"take_arguments<defaultArg>1" }
+              Literal{ value = :"take_arguments<defaultArg>2" }
+            ],
+            expr = EmptyTree
+          }
         }
       ]
     }

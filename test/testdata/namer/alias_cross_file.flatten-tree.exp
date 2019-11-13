@@ -10,17 +10,17 @@ begin
     end
   end
   class ::TestSig<<C TestSig>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
     def test_resolve(<blk>)
       <emptyTree>
     end
 
     def self.<static-init>(<blk>)
-      <self>.sig() do ||
-        <self>.returns(::T2)
+      begin
+        <self>.sig() do ||
+          <self>.returns(::T2)
+        end
+        :"test_resolve"
+        <emptyTree>
       end
     end
   end

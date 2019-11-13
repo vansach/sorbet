@@ -8,7 +8,7 @@ class <emptyTree><<C <root>>> < ()
       <emptyTree>
     end
 
-    <emptyTree>
+    :"initialize"
   end
 
   <emptyTree>::<C None>.new()

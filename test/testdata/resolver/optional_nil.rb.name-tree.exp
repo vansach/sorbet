@@ -66,6 +66,22 @@ begin
           ""
         end
 
+        :"foo"
+
+        :"bar"
+
+        :"qux"
+
+        :"baz"
+
+        :"foo<defaultArg>1"
+
+        :"bar<defaultArg>1"
+
+        :"qux<defaultArg>1"
+
+        :"baz<defaultArg>1"
+
         ::Sorbet::Private::Static.keep_for_ide(<emptyTree>::<C T>::<C Sig>)
       end
       ::Sorbet::Private::Static.keep_for_ide(::Test)

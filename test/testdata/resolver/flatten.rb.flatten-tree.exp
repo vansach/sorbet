@@ -25,31 +25,10 @@ begin
     end
   end
   class ::A<<C A>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
     def foo(<blk>)
       begin
         :"food"
         :"foos"
-      end
-    end
-
-    def self.sfoo(<blk>)
-      begin
-        :"sfood"
-        :"sfoos"
       end
     end
 
@@ -61,6 +40,13 @@ begin
       <emptyTree>
     end
 
+    def self.sfoo(<blk>)
+      begin
+        :"sfood"
+        :"sfoos"
+      end
+    end
+
     def sfood(<blk>)
       <emptyTree>
     end
@@ -70,7 +56,11 @@ begin
     end
 
     def self.<static-init>(<blk>)
-      <emptyTree>
+      begin
+        :"foo"
+        :"sfoo"
+        <emptyTree>
+      end
     end
   end
   <emptyTree>

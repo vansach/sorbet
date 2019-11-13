@@ -10,10 +10,6 @@ begin
     end
   end
   class ::Test<<C Test>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
     def test_next_break(<blk>)
       <self>.each() do ||
         begin
@@ -32,7 +28,7 @@ begin
     end
 
     def self.<static-init>(<blk>)
-      <emptyTree>
+      :"test_next_break"
     end
   end
   <emptyTree>

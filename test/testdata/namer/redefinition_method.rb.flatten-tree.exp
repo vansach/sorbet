@@ -10,14 +10,6 @@ begin
     end
   end
   class ::Main<<C Main>> < (::<todo sym>)
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
-    <emptyTree>
-
     def foo<foo$1>(a, <blk>)
       a
     end
@@ -35,6 +27,9 @@ begin
         <self>.sig() do ||
           <self>.params({:"a" => ::Integer}).returns(::Integer)
         end
+        :"foo"
+        :"foo"
+        :"foo"
         ::Sorbet::Private::Static.keep_for_ide(::T::Sig)
         <emptyTree>
       end
