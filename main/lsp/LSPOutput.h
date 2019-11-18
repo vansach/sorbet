@@ -19,9 +19,8 @@ class NotificationMessage;
  * the same output.
  */
 class LSPOutput {
-    absl::Mutex mtx;
-
 protected:
+    absl::Mutex mtx;
     // Implementation-specific write implementation. Will be called from multiple threads, but invocations will never
     // interleave as method is protected by a mutex.
     virtual void rawWrite(std::unique_ptr<LSPMessage> msg) EXCLUSIVE_LOCKS_REQUIRED(mtx) = 0;
@@ -45,7 +44,7 @@ class LSPStdout final : public LSPOutput {
     std::shared_ptr<spdlog::logger> logger;
 
 protected:
-    void rawWrite(std::unique_ptr<LSPMessage> msg) override;
+    void rawWrite(std::unique_ptr<LSPMessage> msg) override EXCLUSIVE_LOCKS_REQUIRED(mtx);
 
 public:
     LSPStdout(std::shared_ptr<spdlog::logger> &logger);
@@ -56,10 +55,10 @@ public:
  * Used in LSPWrapper and in tests.
  */
 class LSPOutputToVector final : public LSPOutput {
-    std::vector<std::unique_ptr<LSPMessage>> output;
+    std::vector<std::unique_ptr<LSPMessage>> output GUARDED_BY(mtx);
 
 protected:
-    void rawWrite(std::unique_ptr<LSPMessage> msg) override;
+    void rawWrite(std::unique_ptr<LSPMessage> msg) override EXCLUSIVE_LOCKS_REQUIRED(mtx);
 
 public:
     LSPOutputToVector() = default;
@@ -69,6 +68,16 @@ public:
      * That is, if called twice in a row without any intermediate writes, the second time it returns an empty vector.
      */
     std::vector<std::unique_ptr<LSPMessage>> getOutput();
+};
+
+class LSPLambdaOutput final : public LSPOutput {
+    const std::function<void(std::unique_ptr<LSPMessage>)> lambda GUARDED_BY(mtx);
+
+protected:
+    void rawWrite(std::unique_ptr<LSPMessage> msg) override EXCLUSIVE_LOCKS_REQUIRED(mtx);
+
+public:
+    LSPLambdaOutput(std::function<void(std::unique_ptr<LSPMessage>)> &&lambda);
 };
 
 } // namespace sorbet::realmain::lsp
