@@ -1,5 +1,6 @@
 #include "common/Timer.h"
-#include "lsp.h"
+#include "main/lsp/LSPOutput.h"
+#include "main/lsp/lsp.h"
 
 using namespace std;
 
@@ -194,6 +195,11 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
             auto response = make_unique<ResponseMessage>("2.0", id, method);
             response->error = make_unique<ResponseError>(params->code, params->message);
             config->output->write(move(response));
+        } else if (method == LSPMethod::SorbetFence) {
+            // Ensure all prior messages have finished processing before sending response.
+            typecheckerCoord.syncRun([&](auto &tc) -> void {
+                config->output->write(make_unique<ResponseMessage>("2.0", id, LSPMethod::SorbetFence));
+            });
         } else {
             auto response = make_unique<ResponseMessage>("2.0", id, method);
             // Method parsed, but isn't a request. Use SorbetError for `requestMethod`, as `method` isn't valid for a

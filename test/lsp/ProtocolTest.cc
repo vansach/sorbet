@@ -13,7 +13,7 @@ void ProtocolTest::SetUp() {
     // Always use fast path
     // TODO: Make toggleable so we can run slow path tests?
     bool disableFastPath = false;
-    lspWrapper = make_unique<LSPWrapper>(rootPath, disableFastPath);
+    lspWrapper = LSPWrapper::createSingleThreaded(rootPath, disableFastPath);
     lspWrapper->opts.fs = fs;
     lspWrapper->enableAllExperimentalFeatures();
 }
