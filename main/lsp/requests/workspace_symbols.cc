@@ -27,7 +27,8 @@ public:
     vector<unique_ptr<SymbolInformation>> doQuery(string_view query, size_t maxResults = MAX_RESULTS);
 
 private:
-    vector<unique_ptr<SymbolInformation>> symbolRef2SymbolInformations(core::SymbolRef symRef, size_t maxLocations);
+    vector<unique_ptr<SymbolInformation>> symbolRef2SymbolInformations(core::SymbolRef symRef, bool matchOnFullName,
+                                                                       size_t maxLocations);
 
     const LSPConfiguration &config;
     const core::GlobalState &gs;
@@ -35,11 +36,9 @@ private:
 
 SymbolMatcher::SymbolMatcher(const LSPConfiguration &config, const core::GlobalState &gs) : config(config), gs(gs) {}
 
-/**
- * Converts a symbol into any (supported) SymbolInformation objects.
- */
-vector<unique_ptr<SymbolInformation>> SymbolMatcher::symbolRef2SymbolInformations(core::SymbolRef symRef,
-                                                                                  size_t maxLocations) {
+/** Converts a symbol into any (supported) SymbolInformation objects. */
+vector<unique_ptr<SymbolInformation>>
+SymbolMatcher::symbolRef2SymbolInformations(core::SymbolRef symRef, bool matchOnFullName, size_t maxLocations) {
     vector<unique_ptr<SymbolInformation>> results;
     auto sym = symRef.data(gs);
     for (auto loc : sym->locs()) {
@@ -53,9 +52,15 @@ vector<unique_ptr<SymbolInformation>> SymbolMatcher::symbolRef2SymbolInformation
         if (location == nullptr) {
             continue;
         }
-        auto result =
-            make_unique<SymbolInformation>(sym->name.show(gs), symbolRef2SymbolKind(gs, symRef), std::move(location));
-        result->containerName = sym->owner.data(gs)->showFullName(gs);
+        unique_ptr<SymbolInformation> result;
+        if (matchOnFullName) {
+            result = make_unique<SymbolInformation>(sym->showFullName(gs), symbolRef2SymbolKind(gs, symRef),
+                                                    std::move(location));
+        } else {
+            result = make_unique<SymbolInformation>(sym->name.show(gs), symbolRef2SymbolKind(gs, symRef),
+                                                    std::move(location));
+            result->containerName = sym->owner.data(gs)->showFullName(gs);
+        }
         results.emplace_back(move(result));
     }
     return results;
@@ -71,6 +76,7 @@ inline bool canMatchWordBoundary(char ch) {
     return isspace(ch);
 }
 
+/** Is symbol that can be returned as a workspace/symbol result. */
 inline bool isEligibleSymbol(const core::GlobalState &gs, const core::SymbolData &symbolData,
                              const core::NameData &nameData) {
     if (nameData->kind == core::NameKind::UNIQUE) {
@@ -211,7 +217,7 @@ vector<unique_ptr<SymbolInformation>> SymbolMatcher::doQuery(string_view query_v
     // prefix-only requirement for non-matches) Don't update partialMatches,
     // because we will continue using it to keep the prefix-only scores for
     // owner-namespaces.
-    vector<pair<u4, int>> candidates;
+    vector<tuple<u4, bool, int>> candidates;
     {
         Timer timeit(gs.tracer(), "SymbolMatcher::doQuery::pass2");
         for (u4 symbolIndex = 1; symbolIndex < gs.symbolsUsed(); symbolIndex++) {
@@ -223,6 +229,7 @@ vector<unique_ptr<SymbolInformation>> SymbolMatcher::doQuery(string_view query_v
             }
             auto shortName = nameData->shortName(gs);
             optional<uint> bestScore = nullopt;
+            bool matchedOnFullName = false;
             auto partialMatch = partialMatchSymbol(shortName, queryBegin, queryEnd, false, ceilingScore);
             if (partialMatch.matchEnd == queryEnd) {
                 bestScore = partialMatch.score;
@@ -244,21 +251,27 @@ vector<unique_ptr<SymbolInformation>> SymbolMatcher::doQuery(string_view query_v
                 auto [plusScore, plusEnd] =
                     partialMatchSymbol(shortName, ancestorEnd, queryEnd, false, bestOrCeilingScore - ancestorScore);
                 if (plusEnd == queryEnd) {
-                    bestScore = min(bestOrCeilingScore, ancestorScore + plusScore);
+                    auto combinedScore = ancestorScore + plusScore;
+                    if (!bestScore.has_value() || *bestScore < combinedScore) {
+                        bestScore = combinedScore;
+                        matchedOnFullName = true;
+                    }
                 }
             }
             if (bestScore.has_value()) {
                 // update ceiling so we stop looking at bad matches
                 ceilingScore = min(ceilingScore, *bestScore * WORST_TO_BEST_RATIO);
-                candidates.emplace_back(symbolIndex, *bestScore);
+                candidates.emplace_back(symbolIndex, matchedOnFullName, *bestScore);
             }
         }
     }
-    fast_sort(candidates, [](pair<u4, int> &left, pair<u4, int> &right) -> bool { return left.second < right.second; });
-    for (auto &candidate : candidates) {
-        core::SymbolRef ref(gs, candidate.first);
+    fast_sort(candidates, [](tuple<u4, bool, int> &left, tuple<u4, bool, int> &right) -> bool {
+        return get<2>(left) < get<2>(right);
+    });
+    for (auto [symbolIndex, matchedOnFullName, bestScore] : candidates) {
+        core::SymbolRef ref(gs, symbolIndex);
         auto maxLocations = min(MAX_LOCATIONS_PER_SYMBOL, maxResults - results.size());
-        for (auto &symbolInformation : symbolRef2SymbolInformations(ref, maxLocations)) {
+        for (auto &symbolInformation : symbolRef2SymbolInformations(ref, matchedOnFullName, maxLocations)) {
             results.emplace_back(move(symbolInformation));
         }
         if (results.size() >= maxResults) {
