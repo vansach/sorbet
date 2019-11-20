@@ -65,10 +65,4 @@ vector<unique_ptr<LSPMessage>> LSPOutputToVector::getOutput() {
     return move(output);
 }
 
-LSPLambdaOutput::LSPLambdaOutput(function<void(unique_ptr<LSPMessage>)> &&lambda) : lambda(move(lambda)) {}
-
-void LSPLambdaOutput::rawWrite(unique_ptr<LSPMessage> msg) {
-    lambda(move(msg));
-}
-
 } // namespace sorbet::realmain::lsp

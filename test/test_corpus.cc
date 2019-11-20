@@ -887,7 +887,7 @@ TEST_P(LSPTest, All) {
                 updates.push_back(
                     makeChange(testFileUris[filename], string(textDocContents.begin(), textDocContents.end()), 2 + i));
             }
-            auto responses = lspWrapper->getLSPResponsesFor(updates);
+            auto responses = lspWrapper->getLSPResponsesFor(move(updates));
             updateDiagnostics(config, testFileUris, responses, diagnostics);
             slowPathPassed = ErrorAssertion::checkAll(
                 test.sourceFileContents, RangeAssertion::getErrorAssertions(assertions), diagnostics, errorPrefixes[i]);
@@ -1040,7 +1040,7 @@ TEST_P(LSPTest, All) {
             auto assertions = RangeAssertion::parseAssertions(updatesAndContents);
             auto assertFastPath = FastPathAssertion::get(assertions);
             auto assertSlowPath = BooleanPropertyAssertion::getValue("assert-slow-path", assertions);
-            auto responses = lspWrapper->getLSPResponsesFor(lspUpdates);
+            auto responses = lspWrapper->getLSPResponsesFor(move(lspUpdates));
             bool foundTypecheckRunInfo = false;
 
             for (auto &r : responses) {

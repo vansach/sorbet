@@ -70,16 +70,6 @@ public:
     std::vector<std::unique_ptr<LSPMessage>> getOutput();
 };
 
-class LSPLambdaOutput final : public LSPOutput {
-    const std::function<void(std::unique_ptr<LSPMessage>)> lambda GUARDED_BY(mtx);
-
-protected:
-    void rawWrite(std::unique_ptr<LSPMessage> msg) override EXCLUSIVE_LOCKS_REQUIRED(mtx);
-
-public:
-    LSPLambdaOutput(std::function<void(std::unique_ptr<LSPMessage>)> &&lambda);
-};
-
 } // namespace sorbet::realmain::lsp
 
 #endif
