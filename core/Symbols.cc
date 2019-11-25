@@ -951,7 +951,7 @@ TypePtr Symbol::sealedSubclassesToUnion(const Context ctx) const {
     ENFORCE(lastClassType != nullptr, "Last element of sealedSubclasses must be ClassType");
     auto subclass = lastClassType->symbol.data(ctx)->attachedClass(ctx);
     ENFORCE(subclass.exists());
-    result = Types::any(ctx, make_type<ClassType>(subclass), result);
+    result = Types::any(ctx, subclass.data(ctx)->externalType(ctx), result);
 
     return result;
 }

@@ -1100,9 +1100,11 @@ bool isSubTypeUnderConstraintSingle(Context ctx, TypeConstraint &constr, Untyped
         }
         return result;
     }
-    if (isa_type<AppliedType>(t2.get())) {
-        if (auto *pt = cast_type<ProxyType>(t1.get())) {
-            return Types::isSubTypeUnderConstraint(ctx, constr, pt->underlying(), t2, mode);
+    if (auto *a2 = cast_type<AppliedType>(t2.get())) {
+        if (auto *c1 = cast_type<ClassType>(t1.get())) {
+            return classSymbolIsAsGoodAs(ctx, c1->symbol, a2->klass);
+        } else if (auto *p1 = cast_type<ProxyType>(t1.get())) {
+            return Types::isSubTypeUnderConstraint(ctx, constr, p1->underlying(), t2, mode);
         }
         return false;
     }
