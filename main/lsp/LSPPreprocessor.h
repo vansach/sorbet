@@ -9,7 +9,6 @@
 #include "core/core.h"
 #include "main/lsp/LSPConfiguration.h"
 #include "main/lsp/LSPMessage.h"
-#include "main/lsp/TimeTravelingGlobalState.h"
 #include <chrono>
 #include <deque>
 #include <optional>
@@ -29,21 +28,10 @@ struct QueueState {
 /**
  * The LSP preprocessor typically runs on an independent thread and performs the following tasks:
  * - Preprocesses and merges contiguous file updates before they are sent to the typechecking thread.
- * - Determines if edits should take the fast or slow path.
  * - Is the source-of-truth for the latest file updates.
- * - Clones initialGS so that the typechecking thread can perform typechecking on the clone.
  * - Early rejects messages that are sent prior to initialization completion.
- * - Determines if a running slow path should be canceled, and undertakes canceling if so.
  */
 class LSPPreprocessor final {
-    /**
-     * This global state is used for indexing. It accumulates a huge nametable of all global things,
-     * and is updated as global things are added/removed/updated. It is never discarded.
-     *
-     * Typechecking is never run on this global state directly. Instead, LSPPreprocessor clones `initialGS` and passes
-     * it to the processing thread for use during typechecking.
-     */
-    TimeTravelingGlobalState ttgs;
     std::shared_ptr<LSPConfiguration> config;
     std::unique_ptr<KeyValueStore> kvstore; // always null for now.
     /** ID of the thread that owns the preprocessor and is allowed to invoke methods on it. */
@@ -52,6 +40,9 @@ class LSPPreprocessor final {
     // The current set of open files as of the latest edit preprocessed. Used to canonicalize file edits into a
     // standard format.
     UnorderedSet<std::string> openFiles;
+
+    // A map from file path to file contents. Contains the latest file edits.
+    UnorderedMap<std::string, std::shared_ptr<core::File>> fileContents;
 
     // Indicates the next version to use on an incoming edit. Used to refer to edits by ID.
     u4 nextVersion = 1;
@@ -69,27 +60,27 @@ class LSPPreprocessor final {
     std::unique_ptr<LSPMessage> makeAndCommitWorkspaceEdit(std::unique_ptr<SorbetWorkspaceEditParams> params,
                                                            std::unique_ptr<LSPMessage> oldMsg);
 
-    /* The following methods convert edits into LSPFileUpdates. */
+    /* The following methods convert edits into SorbetWorkspaceEditParams. */
 
-    void canonicalizeEdits(u4 v, std::unique_ptr<DidChangeTextDocumentParams> changeParams,
-                           LSPFileUpdates &updates) const;
-    void canonicalizeEdits(u4 v, std::unique_ptr<DidOpenTextDocumentParams> openParams, LSPFileUpdates &updates) const;
-    void canonicalizeEdits(u4 v, std::unique_ptr<DidCloseTextDocumentParams> closeParams,
-                           LSPFileUpdates &updates) const;
-    void canonicalizeEdits(u4 v, std::unique_ptr<WatchmanQueryResponse> queryResponse, LSPFileUpdates &updates) const;
-    void mergeEdits(LSPFileUpdates &to, LSPFileUpdates &from);
+    std::unique_ptr<SorbetWorkspaceEditParams>
+    canonicalizeEdits(u4 v, std::unique_ptr<DidChangeTextDocumentParams> changeParams) const;
+    std::unique_ptr<SorbetWorkspaceEditParams>
+    canonicalizeEdits(u4 v, std::unique_ptr<DidOpenTextDocumentParams> openParams) const;
+    std::unique_ptr<SorbetWorkspaceEditParams>
+    canonicalizeEdits(u4 v, std::unique_ptr<DidCloseTextDocumentParams> closeParams) const;
+    std::unique_ptr<SorbetWorkspaceEditParams>
+    canonicalizeEdits(u4 v, std::unique_ptr<WatchmanQueryResponse> queryResponse) const;
+
+    bool ensureInitialized(LSPMethod forMethod, const LSPMessage &msg) const;
 
     /**
-     * Returns a global state for typechecking, cloned from initialGS. Note: The clone does not share an error queue
-     * with initialGS.
+     * Get the current contents of the file at the given path. Returns "" (empty string view) if file does not yet
+     * exist.
      */
-    std::unique_ptr<core::GlobalState> getTypecheckingGS() const;
-
-    bool ensureInitialized(const LSPMethod forMethod, const LSPMessage &msg) const;
+    std::string_view getFileContents(std::string_view path) const;
 
 public:
-    LSPPreprocessor(std::unique_ptr<core::GlobalState> initialGS, const std::shared_ptr<LSPConfiguration> &config,
-                    u4 initialVersion = 0);
+    LSPPreprocessor(std::shared_ptr<LSPConfiguration> config, u4 initialVersion = 0);
 
     /**
      * Performs pre-processing on the incoming LSP request and appends it to the queue.

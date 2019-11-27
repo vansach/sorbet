@@ -197,14 +197,14 @@ public:
     // [LSP] Run only from the typechecking thread.
     // Tries to commit the given epoch. Returns true if the commit succeeeded, or false if it was canceled.
     bool tryCommitEpoch(u4 epoch, bool isCancelable, std::function<void()> typecheck);
-    // [LSP] Run only from the typechecking thread.
+    // [LSP] Run only from the message processing thread thread.
     // Indicates an intent to begin committing a specific epoch.
-    void startCommitEpoch(u4 fromEpoch, u4 toEpoch);
+    void startCommitEpoch(u4 newEpoch);
     // [LSP] Returns 'true' if the currently running typecheck run has been canceled.
     bool wasTypecheckingCanceled() const;
-    // [LSP] If a slow path is running on this GlobalState or its descendent, returns a pair of the committed
-    // epoch and the processing epoch. Otherwise, returns nullopt.
-    std::optional<std::pair<u4, u4>> getRunningSlowPath() const;
+    // [LSP] If a slow path is running on this GlobalState or its descendent, returns the epoch of the running slow
+    // path. Returns nullopt if no slow path is currently running.
+    std::optional<u4> getRunningSlowPath() const;
     // [LSP] Run only from preprocess thread.
     // Tries to cancel a running slow path on this GlobalState or its descendent. Returns true if it succeeded, false if
     // the slow path was unable to be canceled.

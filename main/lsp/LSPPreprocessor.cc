@@ -11,25 +11,6 @@ using namespace std;
 namespace sorbet::realmain::lsp {
 
 namespace {
-bool sanityCheckUpdate(const core::GlobalState &gs, const LSPFileUpdates &updates) {
-    UnorderedSet<string> encounteredFiles;
-    ENFORCE(updates.updatedFiles.size() == updates.updatedFileHashes.size());
-    ENFORCE(updates.updatedFiles.size() == updates.updatedFileIndexes.size());
-    for (int i = 0; i < updates.updatedFiles.size(); i++) {
-        const auto &f = updates.updatedFiles[i];
-        // const auto &h = updates.updatedFileHashes[i];
-        const auto &ast = updates.updatedFileIndexes[i];
-        ENFORCE(f->path() == ast.file.data(gs).path());
-        ENFORCE(!encounteredFiles.contains(f->path()));
-        encounteredFiles.insert(string(f->path()));
-    }
-    ENFORCE(updates.canTakeFastPath || updates.updatedGS.has_value());
-    if (updates.hasNewFiles) {
-        ENFORCE(!updates.canTakeFastPath);
-    }
-    return true;
-}
-
 void cancelTimer(unique_ptr<Timer> &timer) {
     // Protect against nullptrs.
     if (timer) {
@@ -66,36 +47,24 @@ string readFile(string_view path, const FileSystem &fs) {
     }
 }
 
-string_view getFileContents(LSPFileUpdates &updates, const core::GlobalState &initialGS, string_view path) {
-    // Get last file in array matching path. There may be duplicates (which will be culled before committing).
-    const auto &updatedFiles = updates.updatedFiles;
-    for (auto it = updatedFiles.rbegin(); it != updatedFiles.rend(); it++) {
-        if ((*it)->path() == path) {
-            return (*it)->source();
-        }
-    }
-
-    auto currentFileRef = initialGS.findFileByPath(path);
-    if (currentFileRef.exists()) {
-        return currentFileRef.data(initialGS).source();
-    } else {
-        return "";
-    }
-}
-
 } // namespace
 
-LSPPreprocessor::LSPPreprocessor(unique_ptr<core::GlobalState> initialGS, const shared_ptr<LSPConfiguration> &config,
-                                 u4 initialVersion)
-    : ttgs(TimeTravelingGlobalState(config, move(initialGS), initialVersion)), config(config),
-      owner(this_thread::get_id()), nextVersion(initialVersion + 1) {}
+LSPPreprocessor::LSPPreprocessor(shared_ptr<LSPConfiguration> config, u4 initialVersion)
+    : config(move(config)), owner(this_thread::get_id()), nextVersion(initialVersion + 1) {}
+
+string_view LSPPreprocessor::getFileContents(std::string_view path) const {
+    auto it = fileContents.find(path);
+    if (it == fileContents.end()) {
+        return string_view();
+    }
+    return it->second->source();
+}
 
 void LSPPreprocessor::mergeFileChanges(absl::Mutex &mtx, QueueState &state) {
     mtx.AssertHeld();
     auto &logger = config->logger;
     // mergeFileChanges is the most expensive operation this thread performs while holding the mutex lock.
     Timer timeit(logger, "lsp.mergeFileChanges");
-    u4 earliestActiveEditVersion = nextVersion;
     auto &pendingRequests = state.pendingRequests;
     const int originalSize = pendingRequests.size();
     int requestsMergedCounter = 0;
@@ -108,7 +77,6 @@ void LSPPreprocessor::mergeFileChanges(absl::Mutex &mtx, QueueState &state) {
         }
         auto &msgParams = get<unique_ptr<SorbetWorkspaceEditParams>>(msg.asNotification().params);
         // See which newer requests we can enqueue. We want to merge them *backwards* into msgParams.
-        earliestActiveEditVersion = ttgs.minVersion(earliestActiveEditVersion, msgParams->updates.versionStart);
         while (it != pendingRequests.end()) {
             auto &mergeMsg = **it;
             const bool canMerge = mergeMsg.isNotification() && mergeMsg.method() == LSPMethod::SorbetWorkspaceEdit;
@@ -124,8 +92,8 @@ void LSPPreprocessor::mergeFileChanges(absl::Mutex &mtx, QueueState &state) {
 
             // Merge updates and tracers, and cancel its timer to avoid a distorted latency metric.
             auto &mergeableParams = get<unique_ptr<SorbetWorkspaceEditParams>>(mergeMsg.asNotification().params);
-            mergeEdits(msgParams->updates, mergeableParams->updates);
-            cancelTimer(msg.timer);
+            msgParams->merge(*mergeableParams);
+            cancelTimer(mergeMsg.timer);
             msg.startTracers.insert(msg.startTracers.end(), mergeMsg.startTracers.begin(), mergeMsg.startTracers.end());
             // Delete the update we just merged and move on to next item.
             it = pendingRequests.erase(it);
@@ -133,63 +101,14 @@ void LSPPreprocessor::mergeFileChanges(absl::Mutex &mtx, QueueState &state) {
         }
     }
     ENFORCE(pendingRequests.size() + requestsMergedCounter == originalSize);
-
-    // Check if we should cancel the slow path.
-    const auto &gs = ttgs.getGlobalState();
-    const auto runningSlowPath = gs.getRunningSlowPath();
-    // Only try to cancel if the typechecking thread is running the slow path.
-    if (runningSlowPath.has_value()) {
-        const auto &[committed, end] = runningSlowPath.value();
-        earliestActiveEditVersion = ttgs.minVersion(committed, earliestActiveEditVersion);
-
-        // Avoid canceling if the currently-running slow path has already been canceled.
-        if (!gs.wasTypecheckingCanceled()) {
-            for (auto &msg : pendingRequests) {
-                if (msg->isNotification() && msg->method() == LSPMethod::SorbetWorkspaceEdit) {
-                    Timer timeit(logger, "tryCancelSlowPath");
-                    auto &params = get<unique_ptr<SorbetWorkspaceEditParams>>(msg->asNotification().params);
-                    auto combinedUpdates = ttgs.getCombinedUpdates(committed + 1, params->updates.versionEnd);
-                    // Cancel if combined updates end up taking the fast path, or if the new updates will just take the
-                    // slow path a second time when the current slow path finishes.
-                    if ((combinedUpdates.canTakeFastPath || !params->updates.canTakeFastPath) &&
-                        gs.tryCancelSlowPath(params->updates.versionEnd)) {
-                        if (combinedUpdates.canTakeFastPath) {
-                            logger->debug(
-                                "[Preprocessor] Canceling typechecking, as edits {} thru {} can take fast path.",
-                                combinedUpdates.versionStart, combinedUpdates.versionEnd);
-                        } else {
-                            logger->debug(
-                                "[Preprocessor] Canceling typechecking, as new edits {} thru {} will just take "
-                                "the slow path again.",
-                                params->updates.versionStart, params->updates.versionEnd);
-                            combinedUpdates.updatedGS = getTypecheckingGS();
-                        }
-                        combinedUpdates.cancellationExpected = params->updates.cancellationExpected;
-                        params->updates = move(combinedUpdates);
-                    }
-                    break;
-                } else if (!msg->isDelayable()) {
-                    // Message is not delayable, and is not an edit. Can't cancel the slow path.
-                    break;
-                }
-            }
-        }
-    }
-
-    // Prune history for all messages no longer in queue and no longer being typechecked.
-    ttgs.pruneBefore(earliestActiveEditVersion);
-}
-
-unique_ptr<core::GlobalState> LSPPreprocessor::getTypecheckingGS() const {
-    return ttgs.getGlobalState().deepCopy();
 }
 
 unique_ptr<LSPMessage> LSPPreprocessor::makeAndCommitWorkspaceEdit(unique_ptr<SorbetWorkspaceEditParams> params,
                                                                    unique_ptr<LSPMessage> oldMsg) {
-    ttgs.commitEdits(params->updates);
-    if (!params->updates.canTakeFastPath) {
-        params->updates.updatedGS = getTypecheckingGS();
+    for (auto &u : params->updates) {
+        fileContents[u->path()] = u;
     }
+
     auto newMsg =
         make_unique<LSPMessage>(make_unique<NotificationMessage>("2.0", LSPMethod::SorbetWorkspaceEdit, move(params)));
     newMsg->timer = move(oldMsg->timer);
@@ -204,7 +123,6 @@ bool LSPPreprocessor::ensureInitialized(LSPMethod method, const LSPMessage &msg)
         return true;
     }
     config->logger->error("Serving request before got an Initialize & Initialized handshake from IDE");
-    vector<unique_ptr<LSPMessage>> responses;
     if (!msg.isNotification()) {
         auto id = msg.id().value_or(0);
         auto response = make_unique<ResponseMessage>("2.0", id, msg.method());
@@ -231,8 +149,6 @@ void LSPPreprocessor::preprocessAndEnqueue(QueueState &state, unique_ptr<LSPMess
     auto &logger = config->logger;
     bool shouldEnqueue = false;
     bool shouldMerge = false;
-    // Ensure TTGS has file contents from previous edit.
-    ttgs.travel(nextVersion - 1);
     switch (method) {
         case LSPMethod::$CancelRequest: {
             absl::MutexLock lock(&stateMtx);
@@ -273,16 +189,7 @@ void LSPPreprocessor::preprocessAndEnqueue(QueueState &state, unique_ptr<LSPMess
             break;
         }
         case LSPMethod::Initialized: {
-            InitializedParams &params = *get<unique_ptr<InitializedParams>>(msg->asNotification().params);
-            {
-                Timer timeit(logger, "initial_index");
-                ShowOperation op(*config, "Indexing", "Indexing files...");
-                params.updates.updatedFileIndexes = ttgs.indexFromFileSystem();
-                params.updates.updatedFileHashes = ttgs.getGlobalStateHashes();
-            }
             config->markInitialized();
-            params.updates.canTakeFastPath = false;
-            params.updates.updatedGS = getTypecheckingGS();
             shouldEnqueue = true;
             break;
         }
@@ -292,8 +199,7 @@ void LSPPreprocessor::preprocessAndEnqueue(QueueState &state, unique_ptr<LSPMess
             // Ignore files not in workspace.
             if (config->isUriInWorkspace(params->textDocument->uri)) {
                 openFiles.insert(config->remoteName2Local(params->textDocument->uri));
-                auto newParams = make_unique<SorbetWorkspaceEditParams>();
-                canonicalizeEdits(nextVersion++, move(params), newParams->updates);
+                auto newParams = canonicalizeEdits(nextVersion++, move(params));
                 msg = makeAndCommitWorkspaceEdit(move(newParams), move(msg));
                 shouldEnqueue = shouldMerge = true;
             }
@@ -303,8 +209,7 @@ void LSPPreprocessor::preprocessAndEnqueue(QueueState &state, unique_ptr<LSPMess
             auto &params = get<unique_ptr<DidCloseTextDocumentParams>>(msg->asNotification().params);
             if (config->isUriInWorkspace(params->textDocument->uri)) {
                 openFiles.erase(config->remoteName2Local(params->textDocument->uri));
-                auto newParams = make_unique<SorbetWorkspaceEditParams>();
-                canonicalizeEdits(nextVersion++, move(params), newParams->updates);
+                auto newParams = canonicalizeEdits(nextVersion++, move(params));
                 msg = makeAndCommitWorkspaceEdit(move(newParams), move(msg));
                 shouldEnqueue = shouldMerge = true;
             }
@@ -313,8 +218,7 @@ void LSPPreprocessor::preprocessAndEnqueue(QueueState &state, unique_ptr<LSPMess
         case LSPMethod::TextDocumentDidChange: {
             auto &params = get<unique_ptr<DidChangeTextDocumentParams>>(msg->asNotification().params);
             if (config->isUriInWorkspace(params->textDocument->uri)) {
-                auto newParams = make_unique<SorbetWorkspaceEditParams>();
-                canonicalizeEdits(nextVersion++, move(params), newParams->updates);
+                auto newParams = canonicalizeEdits(nextVersion++, move(params));
                 msg = makeAndCommitWorkspaceEdit(move(newParams), move(msg));
                 shouldEnqueue = shouldMerge = true;
             }
@@ -322,9 +226,8 @@ void LSPPreprocessor::preprocessAndEnqueue(QueueState &state, unique_ptr<LSPMess
         }
         case LSPMethod::SorbetWatchmanFileChange: {
             auto &params = get<unique_ptr<WatchmanQueryResponse>>(msg->asNotification().params);
-            auto newParams = make_unique<SorbetWorkspaceEditParams>();
-            canonicalizeEdits(nextVersion++, move(params), newParams->updates);
-            if (newParams->updates.updatedFiles.empty()) {
+            auto newParams = canonicalizeEdits(nextVersion++, move(params));
+            if (newParams->updates.empty()) {
                 // No need to commit; these file system updates are ignored.
                 // Reclaim edit version, as we didn't actually use this one.
                 nextVersion--;
@@ -352,132 +255,68 @@ void LSPPreprocessor::preprocessAndEnqueue(QueueState &state, unique_ptr<LSPMess
     }
 }
 
-void LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<DidChangeTextDocumentParams> changeParams,
-                                        LSPFileUpdates &updates) const {
-    updates.versionStart = v;
-    updates.versionEnd = v;
-    updates.cancellationExpected = changeParams->sorbetCancellationExpected.value_or(false);
+unique_ptr<SorbetWorkspaceEditParams>
+LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<DidChangeTextDocumentParams> changeParams) const {
+    auto edit = make_unique<SorbetWorkspaceEditParams>();
+    edit->epoch = v;
+    edit->sorbetCancellationExpected = changeParams->sorbetCancellationExpected.value_or(false);
     string_view uri = changeParams->textDocument->uri;
     if (config->isUriInWorkspace(uri)) {
         string localPath = config->remoteName2Local(uri);
-        if (config->isFileIgnored(localPath)) {
-            return;
+        if (!config->isFileIgnored(localPath)) {
+            string fileContents = changeParams->getSource(getFileContents(localPath));
+            edit->updates.push_back(
+                make_shared<core::File>(move(localPath), move(fileContents), core::File::Type::Normal));
         }
-        string fileContents;
-        for (auto &change : changeParams->contentChanges) {
-            if (change->range) {
-                fileContents = string(getFileContents(updates, ttgs.getGlobalState(), localPath));
-                auto &range = *change->range;
-                // incremental update
-                core::Loc::Detail start, end;
-                start.line = range->start->line + 1;
-                start.column = range->start->character + 1;
-                end.line = range->end->line + 1;
-                end.column = range->end->character + 1;
-                core::File old(string(localPath), string(fileContents), core::File::Type::Normal);
-                // These offsets are non-nullopt assuming the input range is a valid range.
-                auto startOffset = core::Loc::pos2Offset(old, start).value();
-                auto endOffset = core::Loc::pos2Offset(old, end).value();
-                fileContents = fileContents.replace(startOffset, endOffset - startOffset, change->text);
-            } else {
-                // replace
-                fileContents = move(change->text);
-            }
-        }
-        updates.updatedFiles.push_back(
-            make_shared<core::File>(move(localPath), move(fileContents), core::File::Type::Normal));
     }
+    return edit;
 }
 
-void LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<DidOpenTextDocumentParams> openParams,
-                                        LSPFileUpdates &updates) const {
-    updates.versionStart = v;
-    updates.versionEnd = v;
+unique_ptr<SorbetWorkspaceEditParams>
+LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<DidOpenTextDocumentParams> openParams) const {
+    auto edit = make_unique<SorbetWorkspaceEditParams>();
+    edit->epoch = v;
     string_view uri = openParams->textDocument->uri;
     if (config->isUriInWorkspace(uri)) {
         string localPath = config->remoteName2Local(uri);
         if (!config->isFileIgnored(localPath)) {
-            updates.updatedFiles.push_back(make_shared<core::File>(
-                move(localPath), move(openParams->textDocument->text), core::File::Type::Normal));
+            edit->updates.push_back(make_shared<core::File>(move(localPath), move(openParams->textDocument->text),
+                                                            core::File::Type::Normal));
         }
     }
+    return edit;
 }
 
-void LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<DidCloseTextDocumentParams> closeParams,
-                                        LSPFileUpdates &updates) const {
-    updates.versionStart = v;
-    updates.versionEnd = v;
+unique_ptr<SorbetWorkspaceEditParams>
+LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<DidCloseTextDocumentParams> closeParams) const {
+    auto edit = make_unique<SorbetWorkspaceEditParams>();
+    edit->epoch = v;
     string_view uri = closeParams->textDocument->uri;
     if (config->isUriInWorkspace(uri)) {
         string localPath = config->remoteName2Local(uri);
         if (!config->isFileIgnored(localPath)) {
             // Use contents of file on disk.
-            updates.updatedFiles.push_back(make_shared<core::File>(
-                move(localPath), readFile(localPath, *config->opts.fs), core::File::Type::Normal));
+            edit->updates.push_back(make_shared<core::File>(move(localPath), readFile(localPath, *config->opts.fs),
+                                                            core::File::Type::Normal));
         }
     }
+    return edit;
 }
 
-void LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<WatchmanQueryResponse> queryResponse,
-                                        LSPFileUpdates &updates) const {
-    updates.versionStart = v;
-    updates.versionEnd = v;
+unique_ptr<SorbetWorkspaceEditParams>
+LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<WatchmanQueryResponse> queryResponse) const {
+    auto edit = make_unique<SorbetWorkspaceEditParams>();
+    edit->epoch = v;
     for (auto file : queryResponse->files) {
         // Don't append rootPath if it is empty.
         string localPath = !config->rootPath.empty() ? absl::StrCat(config->rootPath, "/", file) : file;
         // Editor contents supercede file system updates.
         if (!config->isFileIgnored(localPath) && !openFiles.contains(localPath)) {
-            updates.updatedFiles.push_back(make_shared<core::File>(
-                move(localPath), readFile(localPath, *config->opts.fs), core::File::Type::Normal));
+            edit->updates.push_back(make_shared<core::File>(move(localPath), readFile(localPath, *config->opts.fs),
+                                                            core::File::Type::Normal));
         }
     }
-}
-
-void LSPPreprocessor::mergeEdits(LSPFileUpdates &to, LSPFileUpdates &from) {
-    ENFORCE(sanityCheckUpdate(ttgs.getGlobalState(), to));
-    ENFORCE(sanityCheckUpdate(ttgs.getGlobalState(), from));
-
-    // fromId must happen *after* toId.
-    ENFORCE(ttgs.comesBefore(to.versionEnd, from.versionEnd));
-    // 'from' has newer updates, so merge into from and then move into to.
-    UnorderedSet<int> encounteredFiles;
-    for (auto &index : from.updatedFileIndexes) {
-        encounteredFiles.insert(index.file.id());
-    }
-    int i = -1;
-    for (auto &index : to.updatedFileIndexes) {
-        i++;
-        if (!encounteredFiles.contains(index.file.id())) {
-            encounteredFiles.insert(index.file.id());
-            from.updatedFileIndexes.push_back(move(index));
-            from.updatedFiles.push_back(move(to.updatedFiles[i]));
-            from.updatedFileHashes.push_back(move(to.updatedFileHashes[i]));
-        }
-    }
-    to.updatedFiles = move(from.updatedFiles);
-    to.updatedFileIndexes = move(from.updatedFileIndexes);
-    to.updatedFileHashes = move(from.updatedFileHashes);
-    to.hasNewFiles = to.hasNewFiles || from.hasNewFiles;
-    to.canTakeFastPath = ttgs.canTakeFastPath(to.versionStart - 1, to);
-    // `to` now includes the contents of `from`.
-    to.versionEnd = from.versionEnd;
-    // No need to update versionStart, as to comes before from.
-    ENFORCE(ttgs.comesBefore(to.versionStart, from.versionStart));
-    if (to.canTakeFastPath) {
-        prodCategoryCounterInc("lsp.merge_edits", "fast_path");
-        to.updatedGS = nullopt;
-    } else if (from.updatedGS.has_value()) {
-        // `from` has all file updates from `to` and `from` so its GS can be re-used if specified.
-        prodCategoryCounterInc("lsp.merge_edits", "slow_path_reuse_gs");
-        to.updatedGS = move(from.updatedGS.value());
-    } else {
-        // Roll forward again so initial GS has changes from this update prior to copying.
-        prodCategoryCounterInc("lsp.merge_edits", "slow_path_new_gs");
-        ttgs.travel(from.versionEnd);
-        to.updatedGS = getTypecheckingGS();
-    }
-    to.cancellationExpected = to.cancellationExpected || from.cancellationExpected;
-    ENFORCE(sanityCheckUpdate(ttgs.getGlobalState(), to));
+    return edit;
 }
 
 } // namespace sorbet::realmain::lsp

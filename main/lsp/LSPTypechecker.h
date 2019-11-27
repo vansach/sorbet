@@ -17,6 +17,28 @@ struct LSPQueryResult {
     std::unique_ptr<ResponseError> error = nullptr;
 };
 
+/**
+ * Encapsulates an update to LSP's file state in a compact form.
+ */
+struct LSPFileUpdates {
+    // This specific update contains edits with id epoch.
+    u4 epoch = 0;
+    // The total number of edits that this update represents. Used for stats.
+    u2 editCount = 0;
+    bool cancellationExpected = false;
+    std::vector<std::shared_ptr<core::File>> updatedFiles;
+    bool canTakeFastPath = false;
+    // Indicates that this update contains a new file. Is a hack for determining if combining two updates can take the
+    // fast path.
+    bool hasNewFiles = false;
+    std::vector<core::FileHash> updatedFileHashes;
+    std::vector<ast::ParsedFile> updatedFileIndexes;
+    // Updated on typechecking thread. Contains indexes processed with typechecking global state.
+    std::vector<ast::ParsedFile> updatedFinalGSFileIndexes;
+    // (Optional) Updated global state object to use to typecheck this update.
+    std::optional<std::unique_ptr<core::GlobalState>> updatedGS;
+};
+
 class TypecheckRun final {
 public:
     // Errors encountered during typechecking.
@@ -77,7 +99,7 @@ class LSPTypechecker final {
     void commitTypecheckRun(TypecheckRun run);
 
 public:
-    LSPTypechecker(const std::shared_ptr<const LSPConfiguration> &config);
+    LSPTypechecker(std::shared_ptr<const LSPConfiguration> config);
     ~LSPTypechecker() = default;
 
     /**
@@ -86,7 +108,8 @@ public:
      *
      * Writes all diagnostic messages to LSPOutput.
      */
-    void initialize(LSPFileUpdates updates);
+    void initialize(std::unique_ptr<core::GlobalState> gs, std::vector<ast::ParsedFile> indexed,
+                    std::vector<core::FileHash> globalStateHashes);
 
     /**
      * Typechecks the given input. Returns 'true' if the updates were committed, or 'false' if typechecking was

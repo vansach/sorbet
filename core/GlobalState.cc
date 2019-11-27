@@ -1487,32 +1487,25 @@ bool GlobalState::wasTypecheckingCanceled() const {
     return lspEpochInvalidator->load() != currentlyProcessingLSPEpoch->load();
 }
 
-void GlobalState::startCommitEpoch(u4 fromEpoch, u4 toEpoch) {
+void GlobalState::startCommitEpoch(u4 newEpoch) {
     absl::MutexLock lock(epochMutex.get());
-    ENFORCE(fromEpoch != toEpoch);
-    ENFORCE(toEpoch != currentlyProcessingLSPEpoch->load());
-    ENFORCE(toEpoch != lastCommittedLSPEpoch->load());
+    ENFORCE(newEpoch != currentlyProcessingLSPEpoch->load());
+    ENFORCE(newEpoch != lastCommittedLSPEpoch->load());
     // epoch should be a version 'ahead' of currentlyProcessingLSPEpoch. The distance between the two is the number of
     // fast path edits that have come in since the last slow path. Since epochs overflow, there's nothing that I can
     // easily assert here to ensure that we are not moving backward in time.
-    currentlyProcessingLSPEpoch->store(toEpoch);
-    lspEpochInvalidator->store(toEpoch);
-    // lastCommittedLSPEpoch currently contains the epoch of the last slow path we processed. Since then, we may have
-    // committed several fast paths. So, update it to the epoch of the last fast path committed.
-    // We do it this way rather than keep it up-to-date after every fast path to reduce footguns, especially in testing.
-    // With this design, when starting a commit epoch, you have to specify the (from, to] range, and it is compiler
-    // enforced.
-    lastCommittedLSPEpoch->store(fromEpoch);
+    currentlyProcessingLSPEpoch->store(newEpoch);
+    lspEpochInvalidator->store(newEpoch);
 }
 
-optional<pair<u4, u4>> GlobalState::getRunningSlowPath() const {
+optional<u4> GlobalState::getRunningSlowPath() const {
     absl::MutexLock lock(epochMutex.get());
     const u4 processing = currentlyProcessingLSPEpoch->load();
     const u4 committed = lastCommittedLSPEpoch->load();
     if (processing == committed) {
         return nullopt;
     }
-    return make_pair(committed, processing);
+    return processing;
 }
 
 bool GlobalState::tryCancelSlowPath(u4 newEpoch) const {

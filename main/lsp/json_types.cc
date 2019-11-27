@@ -175,4 +175,53 @@ unique_ptr<Diagnostic> Diagnostic::copy() const {
     return d;
 }
 
+string TextDocumentContentChangeEvent::apply(string oldSource) const {
+    if (range) {
+        auto &r = *range;
+        // incremental update
+        core::Loc::Detail start, end;
+        start.line = r->start->line + 1;
+        start.column = r->start->character + 1;
+        end.line = r->end->line + 1;
+        end.column = r->end->character + 1;
+        core::File old("./fake/path.rb", string(oldSource), core::File::Type::Normal);
+        // These offsets are non-nullopt assuming the input range is a valid range.
+        auto startOffset = core::Loc::pos2Offset(old, start).value();
+        auto endOffset = core::Loc::pos2Offset(old, end).value();
+        return oldSource.replace(startOffset, endOffset - startOffset, text);
+    } else {
+        return text;
+    }
+}
+
+string DidChangeTextDocumentParams::getSource(string_view oldFileContents) const {
+    string rv = string(oldFileContents);
+    for (auto &change : contentChanges) {
+        rv = change->apply(move(rv));
+    }
+    return rv;
+}
+
+void SorbetWorkspaceEditParams::merge(SorbetWorkspaceEditParams &newerParams) {
+    // 'newerParams' has newer updates, so merge its contents into this object.
+    epoch = newerParams.epoch;
+
+    UnorderedSet<std::string_view> encounteredFiles;
+    auto newUpdates = move(newerParams.updates);
+
+    for (auto &f : newUpdates) {
+        encounteredFiles.insert(f->path());
+    }
+
+    for (auto &f : updates) {
+        if (!encounteredFiles.contains(f->path())) {
+            encounteredFiles.insert(f->path());
+            newUpdates.push_back(move(f));
+        }
+    }
+    updates = move(newUpdates);
+    mergeCount += newerParams.mergeCount + 1;
+    sorbetCancellationExpected = sorbetCancellationExpected || newerParams.sorbetCancellationExpected;
+}
+
 } // namespace sorbet::realmain::lsp

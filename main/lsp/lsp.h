@@ -52,6 +52,18 @@ class LSPLoop {
     std::chrono::time_point<std::chrono::steady_clock> lastMetricUpdateTime;
     /** ID of the main thread, which actually processes LSP requests and performs typechecking. */
     std::thread::id mainThreadId;
+    /** Global state that we keep up-to-date with file edits. We do _not_ typecheck using this global state! We clone
+     * this global state every time we need to perform a slow path typechecking operation. */
+    std::unique_ptr<core::GlobalState> initialGS;
+    /** Contains file hashes for the files stored in `initialGS`. Used to determine if an edit can be typechecked
+     * incrementally. */
+    std::vector<core::FileHash> globalStateHashes;
+    /** Contains a copy of the last edit committed on the slow path. Used in slow path cancelation logic. */
+    LSPFileUpdates lastSlowPathUpdate;
+    /** Contains globalStatehashes evicted in `updates` */
+    UnorderedMap<int, core::FileHash> lastSlowPathEvictedStateHashes;
+
+    std::unique_ptr<KeyValueStore> kvstore; // always null for now.
 
     void addLocIfExists(const core::GlobalState &gs, std::vector<std::unique_ptr<Location>> &locs, core::Loc loc) const;
     std::vector<std::unique_ptr<Location>>
@@ -106,9 +118,14 @@ class LSPLoop {
     bool shouldSendCountersToStatsd(std::chrono::time_point<std::chrono::steady_clock> currentTime) const;
     /** Sends counters to statsd. */
     void sendCountersToStatsd(std::chrono::time_point<std::chrono::steady_clock> currentTime);
-    /** Helper method: If message is an edit taking the slow path, and slow path cancelation is enabled, signal to
-     * GlobalState that we will be starting a commit of the edits. */
-    void maybeStartCommitSlowPathEdit(const LSPMessage &msg) const;
+
+    /** Commits the given edit to `initialGS`, and returns a canonical LSPFileUpdates object containing indexed trees
+     * and file hashes. */
+    LSPFileUpdates commitEdit(SorbetWorkspaceEditParams &edit);
+
+    std::pair<LSPFileUpdates, UnorderedMap<int, core::FileHash>>
+    mergeUpdates(const LSPFileUpdates &older, const UnorderedMap<int, core::FileHash> &olderEvictions,
+                 const LSPFileUpdates &newer, const UnorderedMap<int, core::FileHash> &newerEvictions) const;
 
 public:
     LSPLoop(std::unique_ptr<core::GlobalState> initialGS, const std::shared_ptr<LSPConfiguration> &config);

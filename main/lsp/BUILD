@@ -18,7 +18,6 @@ cc_library(
         "LocalVarSaver.h",
         "NextMethodFinder.h",
         "ShowOperation.h",
-        "TimeTravelingGlobalState.h",
         "json_types.h",
         "lsp.h",
         "lsp_messages_gen.h",
