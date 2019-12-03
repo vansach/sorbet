@@ -45,11 +45,22 @@ class GlobalState final {
     friend struct NameRefDebugCheck;
 
 public:
+    // Represents a task that can run while preempting typechecking.
+    class PreemptionTask {
+    public:
+        PreemptionTask() = default;
+        virtual ~PreemptionTask() = default;
+
+        virtual void run() = 0;
+    };
+
     GlobalState(std::shared_ptr<ErrorQueue> errorQueue,
                 std::shared_ptr<absl::Mutex> epochMutex = std::make_shared<absl::Mutex>(),
                 std::shared_ptr<std::atomic<u4>> currentlyProcessingLSPEpoch = std::make_shared<std::atomic<u4>>(0),
                 std::shared_ptr<std::atomic<u4>> lspEpochInvalidator = std::make_shared<std::atomic<u4>>(0),
-                std::shared_ptr<std::atomic<u4>> lastCommittedLSPEpoch = std::make_shared<std::atomic<u4>>(0));
+                std::shared_ptr<std::atomic<u4>> lastCommittedLSPEpoch = std::make_shared<std::atomic<u4>>(0),
+                std::shared_ptr<std::shared_ptr<PreemptionTask>> preemptTask =
+                    std::make_shared<std::shared_ptr<PreemptionTask>>(std::make_shared<PreemptionTask>()));
 
     void initEmpty();
     void installIntrinsics();
@@ -209,6 +220,13 @@ public:
     // Tries to cancel a running slow path on this GlobalState or its descendent. Returns true if it succeeded, false if
     // the slow path was unable to be canceled.
     bool tryCancelSlowPath(u4 newEpoch) const;
+    // [LSP] Run only from message processing thread.
+    // Attempts to preempt a running slow path to run the provided task. If it returns true, the task is guaranteed
+    // to run.
+    bool tryPreempt(std::shared_ptr<PreemptionTask> task);
+    // [LSP] Run from the typechecker thread during a slow path. Attempts to run the preeemption task, if one is
+    // registered. Returns true if it ran a preemption task.
+    bool tryRunPreemptionTask();
 
     void trace(std::string_view msg) const;
 
@@ -227,6 +245,12 @@ public:
     bool hasAnyDslPlugin() const;
 
     std::vector<std::unique_ptr<pipeline::semantic_extension::SemanticExtension>> semanticExtensions;
+    // In LSP mode: Used to pre-empt typechecking (post-resolver).
+    // - Worker threads grab as a reader lock, and routinely gives up and re-acquire the lock to allow other requests to
+    // pre-empt.
+    // - Typechecking coordinator thread grabs as a writer lock when there's a preemption function, which halts all
+    // worker threads.
+    const std::unique_ptr<absl::Mutex> typecheckMutex;
 
 private:
     bool shouldReportErrorOn(Loc loc, ErrorClass what) const;
@@ -264,6 +288,9 @@ private:
     // If lastCommittedLSPEpoch != currentlyProcessingLSPEpoch, then GlobalState is currently running a slow path
     // containing edits (lastCommittedLSPEpoch, currentlyProcessingLSPEpoch].
     const std::shared_ptr<std::atomic<u4>> lastCommittedLSPEpoch;
+    // Task to run when pre-empting typechecking. Outer shared_ptr is shared amongst all GlobalState instances that
+    // share a common lineage, whereas contents of inner shared_ptr is atomically replaced during preemption.
+    const std::shared_ptr<std::shared_ptr<PreemptionTask>> preemptTask;
 
     bool freezeSymbolTable();
     bool freezeNameTable();
