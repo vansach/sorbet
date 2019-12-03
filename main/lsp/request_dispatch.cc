@@ -10,7 +10,8 @@ using namespace std;
 namespace sorbet::realmain::lsp {
 
 namespace {
-vector<core::FileHash> computeStateHashes(const LSPConfiguration &config, const vector<shared_ptr<core::File>> &files) {
+vector<core::FileHash> computeStateHashes(const LSPConfiguration &config, WorkerPool &workers,
+                                          const vector<shared_ptr<core::File>> &files) {
     Timer timeit(config.logger, "computeStateHashes");
     vector<core::FileHash> res(files.size());
     shared_ptr<ConcurrentBoundedQueue<int>> fileq = make_shared<ConcurrentBoundedQueue<int>>(files.size());
@@ -26,7 +27,7 @@ vector<core::FileHash> computeStateHashes(const LSPConfiguration &config, const 
 
     shared_ptr<BlockingBoundedQueue<vector<pair<int, core::FileHash>>>> resultq =
         make_shared<BlockingBoundedQueue<vector<pair<int, core::FileHash>>>>(files.size());
-    config.workers.multiplexJob("lspStateHash", [fileq, resultq, files, &logger]() {
+    workers.multiplexJob("lspStateHash", [fileq, resultq, files, &logger]() {
         vector<pair<int, core::FileHash>> threadResult;
         int processedByThread = 0;
         int job;
@@ -65,12 +66,12 @@ vector<core::FileHash> computeStateHashes(const LSPConfiguration &config, const 
 }
 
 vector<ast::ParsedFile> indexFromFileSystem(unique_ptr<core::GlobalState> &gs, const LSPConfiguration &config,
-                                            std::unique_ptr<KeyValueStore> kvstore) {
+                                            WorkerPool &workers, std::unique_ptr<KeyValueStore> kvstore) {
     vector<ast::ParsedFile> indexed;
     {
         Timer timeit(config.logger, "reIndexFromFileSystem");
         vector<core::FileRef> inputFiles = pipeline::reserveFiles(gs, config.opts.inputFileNames);
-        for (auto &t : pipeline::index(gs, inputFiles, config.opts, config.workers, kvstore)) {
+        for (auto &t : pipeline::index(gs, inputFiles, config.opts, workers, kvstore)) {
             int id = t.file.id();
             if (id >= indexed.size()) {
                 indexed.resize(id + 1);
@@ -194,10 +195,11 @@ LSPLoop::mergeUpdates(const LSPFileUpdates &older, const UnorderedMap<int, core:
 }
 
 LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
+    auto workers = WorkerPool::create(0, *config->logger);
     LSPFileUpdates update;
     update.epoch = edit.epoch;
     update.editCount = edit.mergeCount + 1;
-    update.updatedFileHashes = computeStateHashes(*config, edit.updates);
+    update.updatedFileHashes = computeStateHashes(*config, *workers, edit.updates);
     update.updatedFiles = move(edit.updates);
     update.canTakeFastPath = canTakeFastPath(*initialGS, *config, globalStateHashes, update);
     update.cancellationExpected = edit.sorbetCancellationExpected;
@@ -241,7 +243,7 @@ LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
         fileToPos[fref.id()] = i;
     }
 
-    auto trees = pipeline::index(initialGS, frefs, config->opts, config->workers, kvstore);
+    auto trees = pipeline::index(initialGS, frefs, config->opts, *workers, kvstore);
     initialGS->errorQueue->drainWithQueryResponses(); // Clear error queue; we don't care about errors here.
     update.updatedFileIndexes.resize(trees.size());
     for (auto &ast : trees) {
@@ -336,21 +338,18 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
                     // mergeEdits track how many edits were merged into each committed typechecked edit. So, it's the
                     // number of edits in the commit minus the original.
                     const u4 merged = updates->editCount - 1;
-                    // Only report stats if the edit was committed. (TODO(jvilk): Fast path isn't interruptible, so this
-                    // is always true.)
-                    if (!typechecker.typecheck(move(*updates))) {
-                        prodCategoryCounterInc("lsp.messages.processed", "sorbet/workspaceEdit");
-                        prodCategoryCounterAdd("lsp.messages.processed", "sorbet/mergedEdits", merged);
-                    }
+                    typechecker.typecheckOnFastPath(move(*updates));
+                    prodCategoryCounterInc("lsp.messages.processed", "sorbet/workspaceEdit");
+                    prodCategoryCounterAdd("lsp.messages.processed", "sorbet/mergedEdits", merged);
                 });
             } else {
                 // Slow path (non-blocking so we can cancel it). Tell globalstate that we're starting a change that can
                 // be canceled before passing off the lambda.
                 initialGS->startCommitEpoch(updates->epoch);
-                typecheckerCoord.asyncRun([updates](LSPTypechecker &typechecker) -> void {
+                typecheckerCoord.asyncRun([updates](LSPTypechecker &typechecker, WorkerPool &workers) -> void {
                     const u4 merged = updates->editCount - 1;
                     // Only report stats if the edit was committed.
-                    if (!typechecker.typecheck(move(*updates))) {
+                    if (!typechecker.typecheck(move(*updates), workers)) {
                         prodCategoryCounterInc("lsp.messages.processed", "sorbet/workspaceEdit");
                         prodCategoryCounterAdd("lsp.messages.processed", "sorbet/mergedEdits", merged);
                     }
@@ -358,18 +357,25 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
             }
         } else if (method == LSPMethod::Initialized) {
             prodCategoryCounterInc("lsp.messages.processed", "initialized");
-            vector<ast::ParsedFile> indexed;
-            {
-                Timer timeit(logger, "initial_index");
-                ShowOperation op(*config, "Indexing", "Indexing files...");
-                indexed = indexFromFileSystem(initialGS, *config, nullptr /* TODO(jvilk): Thread through kvstore */);
-                globalStateHashes = computeStateHashes(*config, initialGS->getFiles());
-            }
             auto gs = initialGS->deepCopy();
             // Initialization isn't cancelable, so it's blocking.
-            typecheckerCoord.syncRun([&](LSPTypechecker &typechecker) -> void {
+            typecheckerCoord.syncRunWithWorkers([&](LSPTypechecker &typechecker, WorkerPool &workers) -> void {
+                // Temporarily replace error queue, as it asserts that the same thread that created it uses it.
+                auto savedErrorQueue = initialGS->errorQueue;
+                initialGS->errorQueue = make_shared<core::ErrorQueue>(savedErrorQueue->logger, savedErrorQueue->tracer);
+
+                vector<ast::ParsedFile> indexed;
+                {
+                    Timer timeit(logger, "initial_index");
+                    ShowOperation op(*config, "Indexing", "Indexing files...");
+                    indexed = indexFromFileSystem(initialGS, *config, workers,
+                                                  nullptr /* TODO(jvilk): Thread through kvstore */);
+                    globalStateHashes = computeStateHashes(*config, workers, initialGS->getFiles());
+                }
                 // NOTE: Copy `globalStateHashes`, since LSPLoop needs a copy too to figure out cancelation.
-                typechecker.initialize(move(gs), move(indexed), globalStateHashes);
+                typechecker.initialize(move(gs), move(indexed), globalStateHashes, workers);
+
+                initialGS->errorQueue = move(savedErrorQueue);
             });
         } else if (method == LSPMethod::Exit) {
             prodCategoryCounterInc("lsp.messages.processed", "exit");

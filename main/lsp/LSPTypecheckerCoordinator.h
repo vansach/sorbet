@@ -1,6 +1,7 @@
 #ifndef RUBY_TYPER_LSP_LSPTYPECHECKERCOORDINATOR_H
 #define RUBY_TYPER_LSP_LSPTYPECHECKERCOORDINATOR_H
 
+#include "common/concurrency/WorkerPool.h"
 #include "main/lsp/LSPTypechecker.h"
 
 namespace sorbet::realmain::lsp {
@@ -20,23 +21,31 @@ class LSPTypecheckerCoordinator final {
     /** If 'true', then the typechecker is running on a dedicated thread. */
     bool hasDedicatedThread;
 
+    WorkerPool &workers;
+
     /**
      * Runs the provided function on the typechecker thread.
      */
     void asyncRunInternal(std::function<void()> &&lambda);
 
 public:
-    LSPTypecheckerCoordinator(const std::shared_ptr<const LSPConfiguration> &config);
+    LSPTypecheckerCoordinator(const std::shared_ptr<const LSPConfiguration> &config, WorkerPool &workers);
 
     /**
      * Runs lambda with exclusive access to GlobalState. lambda runs on typechecker thread.
      */
-    void asyncRun(std::function<void(LSPTypechecker &)> &&lambda);
+    void asyncRun(std::function<void(LSPTypechecker &, WorkerPool &)> &&lambda);
 
     /**
      * Like asyncRun, but blocks until `lambda` completes.
      */
     void syncRun(std::function<void(LSPTypechecker &)> &&lambda);
+
+    /**
+     * syncRun, except the function receives direct access to WorkerPool.
+     * Note: This is a separate interface as syncRun as it is needed for preemptible slow path.
+     */
+    void syncRunWithWorkers(std::function<void(LSPTypechecker &, WorkerPool &)> &&lambda);
 
     /**
      * Safely shuts down the typechecker and returns the final GlobalState object. Blocks until typechecker completes

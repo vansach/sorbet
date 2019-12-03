@@ -1,19 +1,13 @@
 #ifndef RUBY_TYPER_LSP_LSPPREPROCESSOR_H
 #define RUBY_TYPER_LSP_LSPPREPROCESSOR_H
 
-#include "ast/ast.h"
-#include "common/concurrency/WorkerPool.h"
-#include "common/kvstore/KeyValueStore.h"
-#include "core/ErrorQueue.h"
-#include "core/NameHash.h"
 #include "core/core.h"
-#include "main/lsp/LSPConfiguration.h"
 #include "main/lsp/LSPMessage.h"
-#include <chrono>
 #include <deque>
-#include <optional>
 
 namespace sorbet::realmain::lsp {
+
+class LSPConfiguration;
 
 /** Used to store the state of LSP's internal request queue.  */
 struct QueueState {
@@ -33,7 +27,6 @@ struct QueueState {
  */
 class LSPPreprocessor final {
     std::shared_ptr<LSPConfiguration> config;
-    std::unique_ptr<KeyValueStore> kvstore; // always null for now.
     /** ID of the thread that owns the preprocessor and is allowed to invoke methods on it. */
     std::thread::id owner;
 

@@ -85,9 +85,9 @@ class LSPTypechecker final {
 
     /** Conservatively reruns entire pipeline without caching any trees. If canceled, returns a TypecheckRun containing
      * the previous global state. */
-    TypecheckRun runSlowPath(LSPFileUpdates updates, bool cancelable) const;
+    TypecheckRun runSlowPath(LSPFileUpdates updates, WorkerPool &workers, bool cancelable) const;
     /** Runs typechecking on the provided updates. */
-    TypecheckRun runTypechecking(LSPFileUpdates updates) const;
+    TypecheckRun runTypechecking(LSPFileUpdates updates, WorkerPool &workers) const;
 
     /**
      * Sends diagnostics from a typecheck run to the client.
@@ -109,13 +109,19 @@ public:
      * Writes all diagnostic messages to LSPOutput.
      */
     void initialize(std::unique_ptr<core::GlobalState> gs, std::vector<ast::ParsedFile> indexed,
-                    std::vector<core::FileHash> globalStateHashes);
+                    std::vector<core::FileHash> globalStateHashes, WorkerPool &workers);
 
     /**
      * Typechecks the given input. Returns 'true' if the updates were committed, or 'false' if typechecking was
-     * canceled.
+     * canceled. Distributes work across the given worker pool.
      */
-    bool typecheck(LSPFileUpdates updates);
+    bool typecheck(LSPFileUpdates updates, WorkerPool &workers);
+
+    /**
+     * Typechecks the given input on the fast path. The edit *must* be a fast path edit! Returns 'true' if the updates
+     * were committed, or 'false' if typechecking was canceled. Uses a single thread for typechecking.
+     */
+    void typecheckOnFastPath(LSPFileUpdates updates);
 
     /**
      * Re-typechecks the provided input to re-produce error messages. Input *must* match already committed state!
@@ -125,6 +131,10 @@ public:
 
     /** Runs the provided query against the given files, and returns matches. */
     LSPQueryResult query(const core::lsp::Query &q, const std::vector<core::FileRef> &filesForQuery) const;
+
+    /** Runs the provided query against the given files, and returns matches. Runs across the threads in WorkerPool. */
+    LSPQueryResult queryMultithreaded(const core::lsp::Query &q, const std::vector<core::FileRef> &filesForQuery,
+                                      WorkerPool &workers) const;
 
     /**
      * Returns the parsed file for the given file, up to the index passes (does not include resolver passes).

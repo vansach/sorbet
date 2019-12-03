@@ -5,8 +5,9 @@
 namespace sorbet::realmain::lsp {
 using namespace std;
 
-LSPTypecheckerCoordinator::LSPTypecheckerCoordinator(const shared_ptr<const LSPConfiguration> &config)
-    : shouldTerminate(false), typechecker(config), config(config), hasDedicatedThread(false) {}
+LSPTypecheckerCoordinator::LSPTypecheckerCoordinator(const shared_ptr<const LSPConfiguration> &config,
+                                                     WorkerPool &workers)
+    : shouldTerminate(false), typechecker(config), config(config), hasDedicatedThread(false), workers(workers) {}
 
 void LSPTypecheckerCoordinator::asyncRunInternal(function<void()> &&lambda) {
     if (hasDedicatedThread) {
@@ -16,8 +17,10 @@ void LSPTypecheckerCoordinator::asyncRunInternal(function<void()> &&lambda) {
     }
 }
 
-void LSPTypecheckerCoordinator::asyncRun(function<void(LSPTypechecker &)> &&lambda) {
-    asyncRunInternal([&typechecker = this->typechecker, lambda]() -> void { lambda(typechecker); });
+void LSPTypecheckerCoordinator::asyncRun(function<void(LSPTypechecker &, WorkerPool &workers)> &&lambda) {
+    asyncRunInternal([&typechecker = this->typechecker, &workers = this->workers, lambda]() -> void {
+        lambda(typechecker, workers);
+    });
 }
 
 void LSPTypecheckerCoordinator::syncRun(function<void(LSPTypechecker &)> &&lambda) {
@@ -30,6 +33,27 @@ void LSPTypecheckerCoordinator::syncRun(function<void(LSPTypechecker &)> &&lambd
     asyncRunInternal([&typechecker = this->typechecker, lambda, &notification, &typecheckerCounters,
                       hasDedicatedThread = this->hasDedicatedThread]() -> void {
         lambda(typechecker);
+        if (hasDedicatedThread) {
+            typecheckerCounters = getAndClearThreadCounters();
+        }
+        notification.Notify();
+    });
+    notification.WaitForNotification();
+    if (hasDedicatedThread) {
+        counterConsume(move(typecheckerCounters));
+    }
+}
+
+void LSPTypecheckerCoordinator::syncRunWithWorkers(function<void(LSPTypechecker &, WorkerPool &)> &&lambda) {
+    absl::Notification notification;
+    CounterState typecheckerCounters;
+    // If typechecker is running on a dedicated thread, then we need to merge its metrics w/ coordinator thread's so we
+    // report them.
+    // Note: Capturing notification by reference is safe here, we we wait for the notification to happen prior to
+    // returning.
+    asyncRunInternal([&typechecker = this->typechecker, &workers = this->workers, lambda, &notification,
+                      &typecheckerCounters, hasDedicatedThread = this->hasDedicatedThread]() -> void {
+        lambda(typechecker, workers);
         if (hasDedicatedThread) {
             typecheckerCounters = getAndClearThreadCounters();
         }
