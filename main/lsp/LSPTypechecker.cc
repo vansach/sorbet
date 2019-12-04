@@ -140,6 +140,7 @@ bool LSPTypechecker::typecheck(LSPFileUpdates updates, WorkerPool &workers) {
     if (updates.canTakeFastPath) {
         // Retypecheck all files that formerly had errors.
         for (auto fref : addToTypecheck) {
+            auto &index = getIndexed(fref);
             updates.updatedFileIndexes.push_back({index.tree->deepCopy(), index.file});
             updates.updatedFiles.push_back(gs->getFiles()[fref.id()]);
             updates.updatedFileHashes.push_back(globalStateHashes[fref.id()]);
@@ -323,7 +324,14 @@ bool LSPTypechecker::runSlowPath(LSPFileUpdates updates, WorkerPool &workers, bo
 
         ENFORCE(gs->lspQuery.isEmpty());
         if (gs->sleepInSlowPath) {
-            Timer::timedSleep(3000ms, *logger, "slow_path.resolve.sleep");
+            // Let cancelation occur during the sleep.
+            for (int i = 0; i < 300; i++) {
+                // 300*10 = 3000ms
+                Timer::timedSleep(10ms, *logger, "slow_path.resolve.sleep");
+                if (gs->wasTypecheckingCanceled()) {
+                    return;
+                }
+            }
         }
         auto maybeResolved = pipeline::resolve(gs, move(indexedCopies), config->opts, workers, config->skipConfigatron);
         if (!maybeResolved.hasResult()) {
@@ -348,7 +356,15 @@ bool LSPTypechecker::runSlowPath(LSPFileUpdates updates, WorkerPool &workers, bo
         }
 
         if (gs->sleepInSlowPath) {
-            Timer::timedSleep(3000ms, *logger, "slow_path.typecheck.sleep");
+            // Let preemption and cancelation occur during the sleep.
+            for (int i = 0; i < 300; i++) {
+                // 300*10 = 3000ms
+                Timer::timedSleep(10ms, *logger, "slow_path.typecheck.sleep");
+                gs->tryRunPreemptionTask();
+                if (gs->wasTypecheckingCanceled()) {
+                    return;
+                }
+            }
         }
 
         // [TESTS ONLY] If a cancellation was expected, wait for it to happen.
