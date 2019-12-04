@@ -182,6 +182,7 @@ LSPLoop::mergeUpdates(const LSPFileUpdates &older, const UnorderedMap<int, core:
     ENFORCE(newer.updatedFiles.size() == newer.updatedFileHashes.size());
     ENFORCE(newer.updatedFiles.size() == newer.updatedFileIndexes.size());
 
+    // For updates, we prioritize _newer_ updates.
     UnorderedSet<string> encountered;
     int i = -1;
     for (auto &f : newer.updatedFiles) {
@@ -205,8 +206,9 @@ LSPLoop::mergeUpdates(const LSPFileUpdates &older, const UnorderedMap<int, core:
         }
     }
 
-    UnorderedMap<int, core::FileHash> combinedEvictions = newerEvictions;
-    for (auto &e : olderEvictions) {
+    // For evictions, which are needed for emulating an older globalStateHashes, we keep the oldest.
+    UnorderedMap<int, core::FileHash> combinedEvictions = olderEvictions;
+    for (auto &e : newerEvictions) {
         if (!combinedEvictions.contains(e.first)) {
             combinedEvictions[e.first] = e.second;
         }
@@ -225,6 +227,7 @@ LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
     update.updatedFiles = move(edit.updates);
     update.canTakeFastPath = canTakeFastPath(*initialGS, *config, globalStateHashes, update);
     update.cancellationExpected = edit.sorbetCancellationExpected;
+    update.preemptionsExpected = edit.sorbetPreemptionsExpected;
 
     // Update globalStateHashes. Keep track of file IDs for these files, along with old hashes for these files.
     vector<core::FileRef> frefs;
@@ -276,7 +279,6 @@ LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
     // TODO(jvilk): We could make this smarter and avoid work if the slow path _isn't_ running.
     auto runningSlowPath = initialGS->getRunningSlowPath();
     if (runningSlowPath.has_value()) {
-        ENFORCE(runningSlowPath.value() == pendingTypecheckUpdates.epoch);
         // A cancelable slow path is currently running. Before running deepCopy(), check if we can cancel -- we might be
         // able to avoid it.
         auto [merged, mergedEvictions] =
@@ -381,7 +383,6 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
             }
         } else if (method == LSPMethod::Initialized) {
             prodCategoryCounterInc("lsp.messages.processed", "initialized");
-            auto gs = initialGS->deepCopy();
             // Initialization isn't cancelable, so it's blocking.
             // TODO: Break out slow path into async run.
             typecheckerCoord.syncRun([&](LSPTypechecker &typechecker, WorkerPool &workers) -> void {
@@ -405,7 +406,7 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
                 // cancelation, LSPTypechecker to run queries)
                 updates.updatedFileHashes = globalStateHashes;
                 updates.updatedFileIndexes = move(indexed);
-                updates.updatedGS = move(gs);
+                updates.updatedGS = initialGS->deepCopy();
                 typechecker.initialize(move(updates), workers);
 
                 // Restore error queue, as initialGS will be used on the LSPLoop thread from now on.

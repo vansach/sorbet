@@ -25,7 +25,6 @@ struct LSPFileUpdates {
     u4 epoch = 0;
     // The total number of edits that this update represents. Used for stats.
     u2 editCount = 0;
-    bool cancellationExpected = false;
     std::vector<std::shared_ptr<core::File>> updatedFiles;
     bool canTakeFastPath = false;
     // Indicates that this update contains a new file. Is a hack for determining if combining two updates can take the
@@ -39,6 +38,10 @@ struct LSPFileUpdates {
     std::vector<ast::ParsedFile> updatedFinalGSFileIndexes;
     // (Optional) Updated global state object to use to typecheck this update.
     std::optional<std::unique_ptr<core::GlobalState>> updatedGS;
+
+    // [Tests-only] Used to force block update until canceled / preempted the given number of times.
+    bool cancellationExpected = false;
+    int preemptionsExpected = 0;
 };
 
 class TypecheckRun final {

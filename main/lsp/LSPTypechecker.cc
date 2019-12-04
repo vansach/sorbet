@@ -48,8 +48,14 @@ LSPTypechecker::UndoState::UndoState(unique_ptr<core::GlobalState> oldGS,
 vector<core::FileRef> LSPTypechecker::restore(UndoState &undoState) {
     // Replace indexed trees and file hashes for any files that have been typechecked on the new final GS.
     for (auto &entry : indexedFinalGS) {
-        indexed[entry.first] = move(undoState.indexed[entry.first]);
-        globalStateHashes[entry.first] = move(undoState.globalStateHashes[entry.first]);
+        // TODO(jvilk): indexedFinalGS contains a bunch of trees that haven't actually been updated, but were
+        // re-typechecked due to changes in other files (e.g. sig updates). We ignore them here, but it would be nice to
+        // amend the fast path to not commit these updates at all.
+        if (undoState.indexed.contains(entry.first)) {
+            indexed[entry.first] = move(undoState.indexed[entry.first]);
+            ENFORCE(undoState.globalStateHashes.contains(entry.first));
+            globalStateHashes[entry.first] = move(undoState.globalStateHashes[entry.first]);
+        }
     }
     indexedFinalGS = std::move(undoState.indexedFinalGS);
 
@@ -72,6 +78,7 @@ vector<core::FileRef> LSPTypechecker::restore(UndoState &undoState) {
 
     // Finally, restore the old global state.
     gs = move(undoState.gs);
+    // Inform caller that we need to retypecheck all files that used to have errors.
     return undoState.filesThatHaveErrors;
 }
 
@@ -83,6 +90,8 @@ void LSPTypechecker::UndoState::recordEvictedState(ast::ParsedFile replacedIndex
     // Also, ignore updates to new files (id >= size of file table)
     if (id < gs->getFiles().size() && !indexed.contains(id)) {
         indexed[id] = move(replacedIndexTree);
+        // gsh should be in-sync with indexed.
+        ENFORCE(!globalStateHashes.contains(id));
         globalStateHashes[id] = move(replacedStateHash);
     }
 }
@@ -131,7 +140,6 @@ bool LSPTypechecker::typecheck(LSPFileUpdates updates, WorkerPool &workers) {
     if (updates.canTakeFastPath) {
         // Retypecheck all files that formerly had errors.
         for (auto fref : addToTypecheck) {
-            auto &index = getIndexed(fref);
             updates.updatedFileIndexes.push_back({index.tree->deepCopy(), index.file});
             updates.updatedFiles.push_back(gs->getFiles()[fref.id()]);
             updates.updatedFileHashes.push_back(globalStateHashes[fref.id()]);
@@ -168,6 +176,7 @@ TypecheckRun LSPTypechecker::runFastPath(LSPFileUpdates updates, WorkerPool &wor
             "Tried to run fast path with a GlobalState object that never had inferencer and resolver runs.");
     // This property is set to 'true' in tests only if the update is expected to take the slow path and get cancelled.
     ENFORCE(!updates.cancellationExpected);
+    ENFORCE(!updates.preemptionsExpected);
     // This path only works for fast path updates.
     ENFORCE(updates.canTakeFastPath);
 
@@ -329,6 +338,14 @@ bool LSPTypechecker::runSlowPath(LSPFileUpdates updates, WorkerPool &workers, bo
 
         // Inform the fast path that this global state is OK for typechecking as resolution has completed.
         gs->lspTypecheckCount++;
+
+        // (Tests only) Let all planned preemptions happen now (rather than later, when we cannot count them)
+        while (updates.preemptionsExpected > 0) {
+            while (!gs->tryRunPreemptionTask()) {
+                Timer::timedSleep(1ms, *logger, "slow_path.expected_preemption.sleep");
+            }
+            updates.preemptionsExpected--;
+        }
 
         if (gs->sleepInSlowPath) {
             Timer::timedSleep(3000ms, *logger, "slow_path.typecheck.sleep");
