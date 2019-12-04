@@ -20,10 +20,12 @@ optional<SorbetTypecheckRunStatus> getTypecheckRunStatus(const LSPMessage &msg) 
 TEST_P(ProtocolTest, MultithreadedWrapperWorks) {
     assertDiagnostics(initializeLSP(), {});
     vector<unique_ptr<LSPMessage>> requests;
+    requests.push_back(make_unique<LSPMessage>(make_unique<NotificationMessage>("2.0", LSPMethod::PAUSE, nullopt)));
     requests.push_back(
         changeFile("yolo1.rb", "# typed: true\nclass Foo2\n  def branch\n    2 + \"dog\"\n  end\nend\n", 2));
     requests.push_back(
         changeFile("yolo1.rb", "# typed: true\nclass Foo1\n  def branch\n    1 + \"bear\"\n  end\nend\n", 3));
+    requests.push_back(make_unique<LSPMessage>(make_unique<NotificationMessage>("2.0", LSPMethod::RESUME, nullopt)));
     assertDiagnostics(send(move(requests)), {{"yolo1.rb", 3, "bear"}});
 }
 

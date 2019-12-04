@@ -58,10 +58,11 @@ class LSPLoop {
     /** Contains file hashes for the files stored in `initialGS`. Used to determine if an edit can be typechecked
      * incrementally. */
     std::vector<core::FileHash> globalStateHashes;
-    /** Contains a copy of the last edit committed on the slow path. Used in slow path cancelation logic. */
-    LSPFileUpdates lastSlowPathUpdate;
-    /** Contains globalStatehashes evicted in `updates` */
-    UnorderedMap<int, core::FileHash> lastSlowPathEvictedStateHashes;
+    /** Contains a copy of the last edit committed on the slow path along with preempted updates. Used in slow path
+     * cancelation logic. */
+    LSPFileUpdates pendingTypecheckUpdates;
+    /** Contains globalStateHashes evicted with `pendingTypecheckUpdates` */
+    UnorderedMap<int, core::FileHash> pendingTypecheckEvictedStateHashes;
 
     std::unique_ptr<KeyValueStore> kvstore; // always null for now.
 

@@ -5,60 +5,76 @@
 namespace sorbet::realmain::lsp {
 using namespace std;
 
+LSPTypecheckerCoordinator::Task::Task(function<void()> &&lambda) : lambda(move(lambda)) {}
+
+void LSPTypecheckerCoordinator::Task::run() {
+    lambda();
+}
+
 LSPTypecheckerCoordinator::LSPTypecheckerCoordinator(const shared_ptr<const LSPConfiguration> &config,
                                                      WorkerPool &workers)
     : shouldTerminate(false), typechecker(config), config(config), hasDedicatedThread(false), workers(workers) {}
 
-void LSPTypecheckerCoordinator::asyncRunInternal(function<void()> &&lambda) {
+void LSPTypecheckerCoordinator::asyncRunInternal(std::shared_ptr<Task> task) {
     if (hasDedicatedThread) {
-        lambdas.push(move(lambda), 1);
+        tasks.push(move(task), 1);
     } else {
-        lambda();
+        task->run();
     }
 }
 
 void LSPTypecheckerCoordinator::asyncRun(function<void(LSPTypechecker &, WorkerPool &workers)> &&lambda) {
-    asyncRunInternal([&typechecker = this->typechecker, &workers = this->workers, lambda]() -> void {
+    asyncRunInternal(make_shared<Task>([&typechecker = this->typechecker, &workers = this->workers, lambda]() -> void {
         lambda(typechecker, workers);
-    });
+    }));
 }
 
-void LSPTypecheckerCoordinator::syncRun(function<void(LSPTypechecker &)> &&lambda) {
+void LSPTypecheckerCoordinator::syncRunPreempt(function<void(LSPTypechecker &)> &&lambda,
+                                               core::GlobalState &initialGS) {
     absl::Notification notification;
     CounterState typecheckerCounters;
-    // If typechecker is running on a dedicated thread, then we need to merge its metrics w/ coordinator thread's so we
-    // report them.
-    // Note: Capturing notification by reference is safe here, we we wait for the notification to happen prior to
+    // Note: Capturing notification by reference is safe here. We wait for the notification to happen prior to
     // returning.
-    asyncRunInternal([&typechecker = this->typechecker, lambda, &notification, &typecheckerCounters,
-                      hasDedicatedThread = this->hasDedicatedThread]() -> void {
+    auto task = make_shared<Task>([&typechecker = this->typechecker, lambda, &notification, &typecheckerCounters,
+                                   hasDedicatedThread = this->hasDedicatedThread]() -> void {
         lambda(typechecker);
         if (hasDedicatedThread) {
             typecheckerCounters = getAndClearThreadCounters();
         }
         notification.Notify();
     });
+
+    // There's a lot going on in these three lines. If preemption succeeds, the currently running slow path is
+    // guaranteed to run it. If it fails, we need to schedule it ourselves.
+    if (!initialGS.tryPreempt(task)) {
+        asyncRunInternal(move(task));
+    }
+
     notification.WaitForNotification();
+
+    // If typechecker is running on a dedicated thread, then we need to merge its metrics w/
+    // coordinator thread's so we report them.
     if (hasDedicatedThread) {
         counterConsume(move(typecheckerCounters));
     }
 }
 
-void LSPTypecheckerCoordinator::syncRunWithWorkers(function<void(LSPTypechecker &, WorkerPool &)> &&lambda) {
+void LSPTypecheckerCoordinator::syncRun(function<void(LSPTypechecker &, WorkerPool &)> &&lambda) {
     absl::Notification notification;
     CounterState typecheckerCounters;
     // If typechecker is running on a dedicated thread, then we need to merge its metrics w/ coordinator thread's so we
     // report them.
     // Note: Capturing notification by reference is safe here, we we wait for the notification to happen prior to
     // returning.
-    asyncRunInternal([&typechecker = this->typechecker, &workers = this->workers, lambda, &notification,
-                      &typecheckerCounters, hasDedicatedThread = this->hasDedicatedThread]() -> void {
-        lambda(typechecker, workers);
-        if (hasDedicatedThread) {
-            typecheckerCounters = getAndClearThreadCounters();
-        }
-        notification.Notify();
-    });
+    asyncRunInternal(
+        make_shared<Task>([&typechecker = this->typechecker, &workers = this->workers, lambda, &notification,
+                           &typecheckerCounters, hasDedicatedThread = this->hasDedicatedThread]() -> void {
+            lambda(typechecker, workers);
+            if (hasDedicatedThread) {
+                typecheckerCounters = getAndClearThreadCounters();
+            }
+            notification.Notify();
+        }));
     notification.WaitForNotification();
     if (hasDedicatedThread) {
         counterConsume(move(typecheckerCounters));
@@ -67,7 +83,7 @@ void LSPTypecheckerCoordinator::syncRunWithWorkers(function<void(LSPTypechecker 
 
 unique_ptr<core::GlobalState> LSPTypecheckerCoordinator::shutdown() {
     unique_ptr<core::GlobalState> gs;
-    syncRun([&](auto &typechecker) -> void {
+    syncRun([&](auto &typechecker, auto &workers) -> void {
         shouldTerminate = true;
         gs = typechecker.destroy();
     });
@@ -84,11 +100,11 @@ unique_ptr<Joinable> LSPTypecheckerCoordinator::startTypecheckerThread() {
         typechecker.changeThread();
 
         while (!shouldTerminate) {
-            function<void()> lambda;
+            shared_ptr<Task> task;
             // Note: Pass in 'true' for silent to avoid spamming log with wait_pop_timed entries.
-            auto result = lambdas.wait_pop_timed(lambda, WorkerPool::BLOCK_INTERVAL(), *config->logger, true);
+            auto result = tasks.wait_pop_timed(task, WorkerPool::BLOCK_INTERVAL(), *config->logger, true);
             if (result.gotItem()) {
-                lambda();
+                task->run();
             }
         }
     });

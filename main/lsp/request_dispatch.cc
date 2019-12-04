@@ -82,6 +82,14 @@ vector<ast::ParsedFile> indexFromFileSystem(unique_ptr<core::GlobalState> &gs, c
         // (Note: Flushing is disabled in LSP mode, so we have to drain.)
         gs->errorQueue->drainWithQueryResponses();
     }
+
+    // When inputFileNames is 0 (as in tests), indexed ends up being size 0 because we don't index payload files.
+    // At the same time, we expect indexed to be the same size as GlobalStateHash, which _does_ have payload files.
+    // Resize the indexed array accordingly.
+    if (indexed.size() < gs->getFiles().size()) {
+        indexed.resize(gs->getFiles().size());
+    }
+
     return indexed;
 }
 
@@ -143,6 +151,20 @@ bool canTakeFastPath(
     }
     logger.debug("Taking fast path");
     return true;
+}
+
+LSPFileUpdates copy(const LSPFileUpdates &updates) {
+    LSPFileUpdates copy;
+    copy.epoch = updates.epoch;
+    copy.canTakeFastPath = updates.canTakeFastPath;
+    copy.editCount = updates.editCount;
+    copy.hasNewFiles = updates.hasNewFiles;
+    copy.updatedFiles = updates.updatedFiles;
+    copy.updatedFileHashes = updates.updatedFileHashes;
+    for (auto &ast : updates.updatedFileIndexes) {
+        copy.updatedFileIndexes.push_back(ast::ParsedFile{ast.tree->deepCopy(), ast.file});
+    }
+    return copy;
 }
 
 } // namespace
@@ -251,17 +273,19 @@ LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
         update.updatedFileIndexes[i] = move(ast);
     }
 
+    // TODO(jvilk): We could make this smarter and avoid work if the slow path _isn't_ running.
     auto runningSlowPath = initialGS->getRunningSlowPath();
     if (runningSlowPath.has_value()) {
-        ENFORCE(runningSlowPath.value() == lastSlowPathUpdate.epoch);
+        ENFORCE(runningSlowPath.value() == pendingTypecheckUpdates.epoch);
         // A cancelable slow path is currently running. Before running deepCopy(), check if we can cancel -- we might be
         // able to avoid it.
         auto [merged, mergedEvictions] =
-            mergeUpdates(lastSlowPathUpdate, lastSlowPathEvictedStateHashes, update, evictedHashes);
+            mergeUpdates(pendingTypecheckUpdates, pendingTypecheckEvictedStateHashes, update, evictedHashes);
         // Cancel if old + new takes fast path, or if the new update will take the slow path anyway.
         if ((merged.canTakeFastPath || !update.canTakeFastPath) && initialGS->tryCancelSlowPath(merged.epoch)) {
             // Cancelation succeeded! Use `merged` as the update.
             update = move(merged);
+            update.canceledSlowPath = true;
             evictedHashes = std::move(mergedEvictions);
         }
     }
@@ -269,22 +293,20 @@ LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
     ENFORCE(update.updatedFiles.size() == update.updatedFileHashes.size());
     ENFORCE(update.updatedFiles.size() == update.updatedFileIndexes.size());
 
-    // deepCopy initialGS if needed.
+    // Completely replace `pendingTypecheckUpdates` if this was a slow path update.
     if (!update.canTakeFastPath) {
         update.updatedGS = initialGS->deepCopy();
-
-        // Update `lastSlowPathUpdate` and `lastSlowPathUpdate` to contain the contents of this new slow path run.
-        lastSlowPathUpdate.epoch = update.epoch;
-        lastSlowPathUpdate.canTakeFastPath = update.canTakeFastPath;
-        lastSlowPathUpdate.editCount = update.editCount;
-        lastSlowPathUpdate.hasNewFiles = update.hasNewFiles;
-        lastSlowPathUpdate.updatedFiles = update.updatedFiles;
-        lastSlowPathUpdate.updatedFileHashes = update.updatedFileHashes;
-        lastSlowPathUpdate.updatedFileIndexes.clear();
-        for (auto &ast : update.updatedFileIndexes) {
-            lastSlowPathUpdate.updatedFileIndexes.push_back(ast::ParsedFile{ast.tree->deepCopy(), ast.file});
-        }
-        lastSlowPathEvictedStateHashes = std::move(evictedHashes);
+        pendingTypecheckUpdates = copy(update);
+        pendingTypecheckEvictedStateHashes = std::move(evictedHashes);
+    } else {
+        // Edit takes the fast path. Merge with this edit so we can reverse it if the slow path gets canceled.
+        // TODO(jvilk): We could be smarter and do less work if we also implemented an in-place merge, or avoided
+        // merging if update canceled the slow path.
+        // TODO(jvilk) 2: This also runs "canTakeFastPath" a second time. Let's fix after putting tests in place.
+        auto [merged, mergedEvictions] =
+            mergeUpdates(pendingTypecheckUpdates, pendingTypecheckEvictedStateHashes, update, evictedHashes);
+        pendingTypecheckUpdates = move(merged);
+        pendingTypecheckEvictedStateHashes = std::move(mergedEvictions);
     }
 
     return update;
@@ -334,14 +356,16 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
             auto updates = make_shared<LSPFileUpdates>(commitEdit(*editParams));
             if (updates->canTakeFastPath) {
                 // Fast path (blocking)
-                typecheckerCoord.syncRun([updates](LSPTypechecker &typechecker) -> void {
-                    // mergeEdits track how many edits were merged into each committed typechecked edit. So, it's the
-                    // number of edits in the commit minus the original.
-                    const u4 merged = updates->editCount - 1;
-                    typechecker.typecheckOnFastPath(move(*updates));
-                    prodCategoryCounterInc("lsp.messages.processed", "sorbet/workspaceEdit");
-                    prodCategoryCounterAdd("lsp.messages.processed", "sorbet/mergedEdits", merged);
-                });
+                typecheckerCoord.syncRunPreempt(
+                    [updates](LSPTypechecker &typechecker) -> void {
+                        // mergeEdits track how many edits were merged into each committed typechecked edit. So, it's
+                        // the number of edits in the commit minus the original.
+                        const u4 merged = updates->editCount - 1;
+                        typechecker.typecheckOnFastPath(move(*updates));
+                        prodCategoryCounterInc("lsp.messages.processed", "sorbet/workspaceEdit");
+                        prodCategoryCounterAdd("lsp.messages.processed", "sorbet/mergedEdits", merged);
+                    },
+                    *initialGS);
             } else {
                 // Slow path (non-blocking so we can cancel it). Tell globalstate that we're starting a change that can
                 // be canceled before passing off the lambda.
@@ -359,8 +383,10 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
             prodCategoryCounterInc("lsp.messages.processed", "initialized");
             auto gs = initialGS->deepCopy();
             // Initialization isn't cancelable, so it's blocking.
-            typecheckerCoord.syncRunWithWorkers([&](LSPTypechecker &typechecker, WorkerPool &workers) -> void {
-                // Temporarily replace error queue, as it asserts that the same thread that created it uses it.
+            // TODO: Break out slow path into async run.
+            typecheckerCoord.syncRun([&](LSPTypechecker &typechecker, WorkerPool &workers) -> void {
+                // Temporarily replace error queue, as it asserts that the same thread that created it uses it and we're
+                // going to use it on typechecker thread for this one operation.
                 auto savedErrorQueue = initialGS->errorQueue;
                 initialGS->errorQueue = make_shared<core::ErrorQueue>(savedErrorQueue->logger, savedErrorQueue->tracer);
 
@@ -372,9 +398,17 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
                                                   nullptr /* TODO(jvilk): Thread through kvstore */);
                     globalStateHashes = computeStateHashes(*config, workers, initialGS->getFiles());
                 }
-                // NOTE: Copy `globalStateHashes`, since LSPLoop needs a copy too to figure out cancelation.
-                typechecker.initialize(move(gs), move(indexed), globalStateHashes, workers);
+                LSPFileUpdates updates;
+                updates.epoch = 0;
+                updates.canTakeFastPath = false;
+                // *Copy* global state hashes; both LSPLoop and LSPTypechecker need a copy (LSPLoop to figure out
+                // cancelation, LSPTypechecker to run queries)
+                updates.updatedFileHashes = globalStateHashes;
+                updates.updatedFileIndexes = move(indexed);
+                updates.updatedGS = move(gs);
+                typechecker.initialize(move(updates), workers);
 
+                // Restore error queue, as initialGS will be used on the LSPLoop thread from now on.
                 initialGS->errorQueue = move(savedErrorQueue);
             });
         } else if (method == LSPMethod::Exit) {
@@ -389,10 +423,10 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
             }
         } else if (method == LSPMethod::SorbetFence) {
             // Ensure all prior messages have finished processing before sending response.
-            typecheckerCoord.syncRun([&](auto &tc) -> void {
+            typecheckerCoord.syncRun([&](auto &tc, auto &workers) -> void {
                 // Send the same fence back to acknowledge the fence.
-                // NOTE: Fence is a notification rather than a request so that we don't have to worry about clashes with
-                // client-chosen IDs when using fences internally.
+                // NOTE: Fence is a notification rather than a request so that we don't have to worry about clashes
+                // with client-chosen IDs when using fences internally.
                 auto response =
                     make_unique<NotificationMessage>("2.0", LSPMethod::SorbetFence, move(msg.asNotification().params));
                 config->output->write(move(response));
@@ -447,61 +481,73 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
             config->output->write(move(response));
         } else if (method == LSPMethod::TextDocumentDocumentHighlight) {
             auto &params = get<unique_ptr<TextDocumentPositionParams>>(rawParams);
-            typecheckerCoord.syncRun([&](auto &typechecker) -> void {
-                config->output->write(handleTextDocumentDocumentHighlight(typechecker, id, *params));
-            });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &typechecker) -> void {
+                    config->output->write(handleTextDocumentDocumentHighlight(typechecker, id, *params));
+                },
+                *initialGS);
         } else if (method == LSPMethod::TextDocumentDocumentSymbol) {
             auto &params = get<unique_ptr<DocumentSymbolParams>>(rawParams);
-            typecheckerCoord.syncRun([&](auto &typechecker) -> void {
-                config->output->write(handleTextDocumentDocumentSymbol(typechecker, id, *params));
-            });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &typechecker) -> void {
+                    config->output->write(handleTextDocumentDocumentSymbol(typechecker, id, *params));
+                },
+                *initialGS);
         } else if (method == LSPMethod::WorkspaceSymbol) {
             auto &params = get<unique_ptr<WorkspaceSymbolParams>>(rawParams);
-            typecheckerCoord.syncRun(
-                [&](auto &tc) -> void { config->output->write(handleWorkspaceSymbols(tc, id, *params)); });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &tc) -> void { config->output->write(handleWorkspaceSymbols(tc, id, *params)); }, *initialGS);
         } else if (method == LSPMethod::TextDocumentDefinition) {
             auto &params = get<unique_ptr<TextDocumentPositionParams>>(rawParams);
-            typecheckerCoord.syncRun(
-                [&](auto &tc) -> void { config->output->write(handleTextDocumentDefinition(tc, id, *params)); });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &tc) -> void { config->output->write(handleTextDocumentDefinition(tc, id, *params)); },
+                *initialGS);
         } else if (method == LSPMethod::TextDocumentTypeDefinition) {
             auto &params = get<unique_ptr<TextDocumentPositionParams>>(rawParams);
-            typecheckerCoord.syncRun(
-                [&](auto &tc) -> void { config->output->write(handleTextDocumentTypeDefinition(tc, id, *params)); });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &tc) -> void { config->output->write(handleTextDocumentTypeDefinition(tc, id, *params)); },
+                *initialGS);
         } else if (method == LSPMethod::TextDocumentHover) {
             auto &params = get<unique_ptr<TextDocumentPositionParams>>(rawParams);
-            typecheckerCoord.syncRun(
-                [&](auto &tc) -> void { config->output->write(handleTextDocumentHover(tc, id, *params)); });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &tc) -> void { config->output->write(handleTextDocumentHover(tc, id, *params)); }, *initialGS);
         } else if (method == LSPMethod::TextDocumentCompletion) {
             auto &params = get<unique_ptr<CompletionParams>>(rawParams);
-            typecheckerCoord.syncRun(
-                [&](auto &tc) -> void { config->output->write(handleTextDocumentCompletion(tc, id, *params)); });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &tc) -> void { config->output->write(handleTextDocumentCompletion(tc, id, *params)); },
+                *initialGS);
         } else if (method == LSPMethod::TextDocumentCodeAction) {
             auto &params = get<unique_ptr<CodeActionParams>>(rawParams);
-            typecheckerCoord.syncRun(
-                [&](auto &tc) -> void { config->output->write(handleTextDocumentCodeAction(tc, id, *params)); });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &tc) -> void { config->output->write(handleTextDocumentCodeAction(tc, id, *params)); },
+                *initialGS);
         } else if (method == LSPMethod::TextDocumentSignatureHelp) {
             auto &params = get<unique_ptr<TextDocumentPositionParams>>(rawParams);
-            typecheckerCoord.syncRun(
-                [&](auto &tc) -> void { config->output->write(handleTextSignatureHelp(tc, id, *params)); });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &tc) -> void { config->output->write(handleTextSignatureHelp(tc, id, *params)); }, *initialGS);
         } else if (method == LSPMethod::TextDocumentReferences) {
             auto &params = get<unique_ptr<ReferenceParams>>(rawParams);
-            typecheckerCoord.syncRun(
-                [&](auto &tc) -> void { config->output->write(handleTextDocumentReferences(tc, id, *params)); });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &tc) -> void { config->output->write(handleTextDocumentReferences(tc, id, *params)); },
+                *initialGS);
         } else if (method == LSPMethod::SorbetReadFile) {
             auto &params = get<unique_ptr<TextDocumentIdentifier>>(rawParams);
-            typecheckerCoord.syncRun([&](auto &tc) -> void {
-                auto response = make_unique<ResponseMessage>("2.0", id, method);
-                auto fref = config->uri2FileRef(tc.state(), params->uri);
-                if (fref.exists()) {
-                    response->result =
-                        make_unique<TextDocumentItem>(params->uri, "ruby", 0, string(fref.data(tc.state()).source()));
-                } else {
-                    response->error = make_unique<ResponseError>(
-                        (int)LSPErrorCodes::InvalidParams, fmt::format("Did not find file at uri {} in {}", params->uri,
-                                                                       convertLSPMethodToString(method)));
-                }
-                config->output->write(move(response));
-            });
+            typecheckerCoord.syncRunPreempt(
+                [&](auto &tc) -> void {
+                    auto response = make_unique<ResponseMessage>("2.0", id, method);
+                    auto fref = config->uri2FileRef(tc.state(), params->uri);
+                    if (fref.exists()) {
+                        response->result = make_unique<TextDocumentItem>(params->uri, "ruby", 0,
+                                                                         string(fref.data(tc.state()).source()));
+                    } else {
+                        response->error =
+                            make_unique<ResponseError>((int)LSPErrorCodes::InvalidParams,
+                                                       fmt::format("Did not find file at uri {} in {}", params->uri,
+                                                                   convertLSPMethodToString(method)));
+                    }
+                    config->output->write(move(response));
+                },
+                *initialGS);
         } else if (method == LSPMethod::Shutdown) {
             prodCategoryCounterInc("lsp.messages.processed", "shutdown");
             auto response = make_unique<ResponseMessage>("2.0", id, method);

@@ -928,11 +928,16 @@ ast::ParsedFilesOrCancelled resolve(unique_ptr<core::GlobalState> &gs, vector<as
 }
 
 ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<ast::ParsedFile> what,
-                                      const options::Options &opts, WorkerPool &workers) {
+                                      const options::Options &opts, WorkerPool &workers, bool cancelable,
+                                      bool preemptible) {
     vector<ast::ParsedFile> typecheck_result;
 
     {
         Timer timeit(gs->tracer(), "typecheck");
+        if (preemptible) {
+            // Before kicking off typechecking, check if we need to preempt.
+            gs->tryRunPreemptionTask();
+        }
 
         shared_ptr<ConcurrentBoundedQueue<ast::ParsedFile>> fileq;
         shared_ptr<BlockingBoundedQueue<typecheck_thread_result>> resultq;
@@ -954,14 +959,22 @@ ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<
 
         {
             ProgressIndicator cfgInferProgress(opts.showProgress, "CFG+Inference", what.size());
-            workers.multiplexJob("typecheck", [ctx, &opts, fileq, resultq]() {
+            workers.multiplexJob("typecheck", [ctx, &opts, &typecheckMutex = gs->typecheckMutex, fileq, resultq,
+                                               cancelable, preemptible]() {
                 typecheck_thread_result threadResult;
                 ast::ParsedFile job;
                 int processedByThread = 0;
 
                 {
-                    for (auto result = fileq->try_pop(job); !result.done() && !ctx.state.wasTypecheckingCanceled();
+                    for (auto result = fileq->try_pop(job);
+                         !result.done() && (!cancelable || !ctx.state.wasTypecheckingCanceled());
                          result = fileq->try_pop(job)) {
+                        unique_ptr<absl::ReaderMutexLock> lock;
+                        if (preemptible) {
+                            // Acquire a reader lock here. Parks the thread if the typechecker thread is trying to
+                            // grab the lock to preempt typechecking.
+                            lock = make_unique<absl::ReaderMutexLock>(typecheckMutex.get());
+                        }
                         if (result.gotItem()) {
                             processedByThread++;
                             core::FileRef file = job.file;
@@ -993,8 +1006,12 @@ ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<
                     }
                     cfgInferProgress.reportProgress(fileq->doneEstimate());
                     gs->errorQueue->flushErrors();
-                    if (ctx.state.wasTypecheckingCanceled()) {
+                    if (cancelable && ctx.state.wasTypecheckingCanceled()) {
                         return ast::ParsedFilesOrCancelled();
+                    }
+
+                    if (preemptible) {
+                        gs->tryRunPreemptionTask();
                     }
                 }
             }

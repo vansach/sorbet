@@ -60,7 +60,7 @@ public:
                 std::shared_ptr<std::atomic<u4>> lspEpochInvalidator = std::make_shared<std::atomic<u4>>(0),
                 std::shared_ptr<std::atomic<u4>> lastCommittedLSPEpoch = std::make_shared<std::atomic<u4>>(0),
                 std::shared_ptr<std::shared_ptr<PreemptionTask>> preemptTask =
-                    std::make_shared<std::shared_ptr<PreemptionTask>>(std::make_shared<PreemptionTask>()));
+                    std::make_shared<std::shared_ptr<PreemptionTask>>(nullptr));
 
     void initEmpty();
     void installIntrinsics();

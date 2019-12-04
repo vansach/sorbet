@@ -11,8 +11,18 @@ namespace sorbet::realmain::lsp {
  * thread).
  */
 class LSPTypecheckerCoordinator final {
-    /** Contains a queue of functions to run on the typechecking thread. */
-    BlockingUnBoundedQueue<std::function<void()>> lambdas;
+    // TODO(jvilk): Switch LSPTypecheckerCoordinator interface to use PreemptionTask instead of std::functions.
+    class Task : public core::GlobalState::PreemptionTask {
+    private:
+        const std::function<void()> lambda;
+
+    public:
+        Task(std::function<void()> &&lambda);
+        void run() override;
+    };
+
+    /** Contains a queue of tasks to run on the typechecking thread. */
+    BlockingUnBoundedQueue<std::shared_ptr<Task>> tasks;
     /** If 'true', the coordinator should terminate immediately. */
     bool shouldTerminate;
     /** LSPTypecheckerCoordinator delegates typechecking operations to LSPTypechecker. */
@@ -26,26 +36,30 @@ class LSPTypecheckerCoordinator final {
     /**
      * Runs the provided function on the typechecker thread.
      */
-    void asyncRunInternal(std::function<void()> &&lambda);
+    void asyncRunInternal(std::shared_ptr<Task> lambda);
 
 public:
     LSPTypecheckerCoordinator(const std::shared_ptr<const LSPConfiguration> &config, WorkerPool &workers);
 
     /**
-     * Runs lambda with exclusive access to GlobalState. lambda runs on typechecker thread.
+     * Runs lambda with exclusive access to typechecker. lambda runs on typechecker thread.
      */
     void asyncRun(std::function<void(LSPTypechecker &, WorkerPool &)> &&lambda);
 
     /**
-     * Like asyncRun, but blocks until `lambda` completes.
+     * Like asyncRun, but:
+     * - Blocks until `lambda` completes.
+     * - If a slow path is currently running, it will preempt the slow path via the passed-in global state.
+     * - Does not have access to WorkerPool. Workers cannot be used during preemption. If workers are needed, use
+     * syncRun.
      */
-    void syncRun(std::function<void(LSPTypechecker &)> &&lambda);
+    void syncRunPreempt(std::function<void(LSPTypechecker &)> &&lambda, core::GlobalState &initialGS);
 
     /**
      * syncRun, except the function receives direct access to WorkerPool.
      * Note: This is a separate interface as syncRun as it is needed for preemptible slow path.
      */
-    void syncRunWithWorkers(std::function<void(LSPTypechecker &, WorkerPool &)> &&lambda);
+    void syncRun(std::function<void(LSPTypechecker &, WorkerPool &)> &&lambda);
 
     /**
      * Safely shuts down the typechecker and returns the final GlobalState object. Blocks until typechecker completes
