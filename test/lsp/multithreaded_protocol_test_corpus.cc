@@ -49,11 +49,12 @@ TEST_P(ProtocolTest, CancelsSlowPathWhenNewEditWouldTakeFastPathWithOldEdits) {
     // Slow path edits two files. One introduces error.
     sendAsync(LSPMessage(make_unique<NotificationMessage>("2.0", LSPMethod::PAUSE, nullopt)));
     // Syntax error in foo.rb.
-    sendAsync(*changeFile("foo.rb", "# typed: true\n\nclass Foo\ndef noend\nend\n", 2, true));
+    sendAsync(*changeFile("foo.rb", "# typed: true\n\nclass Foo\ndef noend\nend\n", 2,
+                          SorbetCancellationExpected::AfterResolver));
     // Typechecking error in bar.rb
     sendAsync(*changeFile(
         "bar.rb", "# typed: true\n\nclass Bar\nextend T::Sig\n\nsig{returns(Integer)}\ndef hello\n\"hi\"\nend\nend\n",
-        2, true));
+        2, SorbetCancellationExpected::AfterResolver));
     sendAsync(LSPMessage(make_unique<NotificationMessage>("2.0", LSPMethod::RESUME, nullopt)));
     // Wait for typechecking to begin to avoid races.
     {
@@ -63,7 +64,61 @@ TEST_P(ProtocolTest, CancelsSlowPathWhenNewEditWouldTakeFastPathWithOldEdits) {
     }
 
     // Make another edit that fixes syntax error and should take fast path.
-    sendAsync(*changeFile("foo.rb", "# typed: true\n\nclass Foo\nend\n", 2, false));
+    sendAsync(*changeFile("foo.rb", "# typed: true\n\nclass Foo\nend\n", 2));
+
+    // Wait for first typecheck run to get canceled.
+    {
+        auto status = getTypecheckRunStatus(*readAsync());
+        ASSERT_TRUE(status.has_value());
+        ASSERT_EQ(*status, SorbetTypecheckRunStatus::Cancelled);
+    }
+
+    // Send a no-op to clear out the pipeline. Should have errors in bar and baz, but not foo.
+    assertDiagnostics(send(LSPMessage(make_unique<NotificationMessage>("2.0", LSPMethod::SorbetFence, 20))),
+                      {
+                          {"bar.rb", 7, "Returning value that does not conform to method result type"},
+                          {"baz.rb", 7, "Returning value that does not conform to method result type"},
+                      });
+}
+
+// Same test as before, but this cancellation happens before the resolver pass. A bug could cause this edit to try to
+// preempt.
+TEST_P(ProtocolTest, CancelsSlowPathWhenNewEditWouldTakeFastPathWithOldEditsBeforeResolver) {
+    auto initOptions = make_unique<SorbetInitializationOptions>();
+    initOptions->enableTypecheckInfo = true;
+    assertDiagnostics(initializeLSP(true /* supportsMarkdown */, move(initOptions)), {});
+
+    // Create three files.
+    assertDiagnostics(send(*openFile("foo.rb", "# typed: true\n\nclass Foo\n\nend\n")), {});
+    assertDiagnostics(
+        send(*openFile(
+            "bar.rb",
+            "# typed: true\n\nclass Bar\nextend T::Sig\n\nsig{returns(String)}\ndef hello\n\"hi\"\nend\nend\n")),
+        {});
+    // baz calls the method defined in bar
+    assertDiagnostics(send(*openFile("baz.rb", "# typed: true\n\nclass Baz\nextend "
+                                               "T::Sig\n\nsig{returns(String)}\ndef hello\nBar.new.hello\nend\nend\n")),
+                      {});
+
+    // Slow path edits two files. One introduces error.
+    sendAsync(LSPMessage(make_unique<NotificationMessage>("2.0", LSPMethod::PAUSE, nullopt)));
+    // Syntax error in foo.rb.
+    sendAsync(*changeFile("foo.rb", "# typed: true\n\nclass Foo\ndef noend\nend\n", 2,
+                          SorbetCancellationExpected::BeforeResolver));
+    // Typechecking error in bar.rb
+    sendAsync(*changeFile(
+        "bar.rb", "# typed: true\n\nclass Bar\nextend T::Sig\n\nsig{returns(Integer)}\ndef hello\n\"hi\"\nend\nend\n",
+        2, SorbetCancellationExpected::BeforeResolver));
+    sendAsync(LSPMessage(make_unique<NotificationMessage>("2.0", LSPMethod::RESUME, nullopt)));
+    // Wait for typechecking to begin to avoid races.
+    {
+        auto status = getTypecheckRunStatus(*readAsync());
+        ASSERT_TRUE(status.has_value());
+        ASSERT_EQ(*status, SorbetTypecheckRunStatus::Started);
+    }
+
+    // Make another edit that fixes syntax error and should take fast path.
+    sendAsync(*changeFile("foo.rb", "# typed: true\n\nclass Foo\nend\n", 2));
 
     // Wait for first typecheck run to get canceled.
     {
@@ -92,7 +147,7 @@ TEST_P(ProtocolTest, CancelsSlowPathWhenNewEditWouldTakeSlowPath) {
     // Slow path 1: Edit foo to have an error since Bar doesn't exist. Expect a cancelation.
     sendAsync(*changeFile(
         "foo.rb", "# typed: true\n\nclass Foo\nextend T::Sig\nsig{returns(Integer)}\ndef foo\nBar.new.bar\nend\nend\n",
-        2, true));
+        2, SorbetCancellationExpected::AfterResolver));
 
     // Wait for typechecking to begin to avoid races.
     {
@@ -103,9 +158,8 @@ TEST_P(ProtocolTest, CancelsSlowPathWhenNewEditWouldTakeSlowPath) {
 
     // Slow path 2: Bar defines the expected method, but declared with a non-integer return value (so foo now has a new
     // error).
-    sendAsync(*changeFile("bar.rb",
-                          "# typed: true\n\nclass Bar\nextend T::Sig\nsig{returns(String)}\ndef bar\n10\nend\nend\n", 2,
-                          false));
+    sendAsync(*changeFile(
+        "bar.rb", "# typed: true\n\nclass Bar\nextend T::Sig\nsig{returns(String)}\ndef bar\n10\nend\nend\n", 2));
 
     // Wait for first typecheck run to get canceled.
     {
@@ -132,7 +186,7 @@ TEST_P(ProtocolTest, CanPreemptSlowPathWithHover) {
 
     // Slow path: Edit foo to have a class with a documentation string.
     sendAsync(*changeFile("foo.rb", "# typed: true\n# A class that does things.\nclass Foo\nextend T::Sig\nend\n", 2,
-                          false, 1));
+                          SorbetCancellationExpected::None, 1));
 
     // Wait for typechecking to begin to avoid races.
     {
@@ -175,7 +229,7 @@ TEST_P(ProtocolTest, CanPreemptSlowPathWithFastPath) {
     sendAsync(*changeFile("foo.rb",
                           "# typed: true\nclass Foo\nextend T::Sig\nsig{returns(Integer)}\ndef "
                           "bar\nbaz\nend\nsig{returns(Float)}\ndef baz\n'not a float'\nend\nend\n",
-                          2, false, 1));
+                          2, SorbetCancellationExpected::None, 1));
     sendAsync(*changeFile(
         "bar.rb", "# typed: true\nclass Bar\nextend T::Sig\nsig{returns(String)}\ndef branch\n1\nend\nend\n", 3));
     sendAsync(LSPMessage(make_unique<NotificationMessage>("2.0", LSPMethod::RESUME, nullopt)));
@@ -216,7 +270,7 @@ TEST_P(ProtocolTest, CanPreemptSlowPathWithFastPathThatFixesAllErrors) {
     sendAsync(*changeFile("foo.rb",
                           "# typed: true\nclass Foo\nextend T::Sig\nsig{returns(Integer)}\ndef "
                           "bar\n'hello'\nend\nend\n",
-                          2, false, 1));
+                          2, SorbetCancellationExpected::None, 1));
     sendAsync(*changeFile(
         "bar.rb", "# typed: true\nclass Bar\nextend T::Sig\nsig{returns(String)}\ndef str\nFoo.new.bar\nend\nend\n",
         3));
@@ -257,7 +311,8 @@ TEST_P(ProtocolTest, CanPreemptSlowPathWithFastPathAndThenCancelBoth) {
         {});
 
     // Slow path: foo.rb will have a syntax error
-    sendAsync(*changeFile("foo.rb", "# typed: true\nclass Foo\nextend T::Sig\n", 2, true, 1));
+    sendAsync(*changeFile("foo.rb", "# typed: true\nclass Foo\nextend T::Sig\n", 2,
+                          SorbetCancellationExpected::AfterResolver, 1));
 
     // Wait for typechecking to begin to avoid races.
     {
@@ -284,6 +339,30 @@ TEST_P(ProtocolTest, CanPreemptSlowPathWithFastPathAndThenCancelBoth) {
                           {"baz.rb", 5, "Returning value that does not conform to method result type"},
                       });
 }
+
+/*TEST_P(ProtocolTest, CanPreemptInitializationTypecheking) {
+    // TODO: Need to populate disk with file then send watchman...?
+
+    // Send 'initialize' message.
+    sendAsync(LSPMessage(make_unique<RequestMessage>(
+        "2.0", nextId++, LSPMethod::Initialize,
+        makeInitializeParams(string(rootPath), string(rootUri), true, nullopt))));
+
+    // "initialize" response
+    {
+        auto msg = readAsync();
+        ASSERT_TRUE(msg->isResponse());
+    }
+
+    // Send an initialized method to complete handshake, indicating that we expect 2 preemptions.
+    {
+        auto initializedParams = make_unique<InitializedParams>();
+        initializedParams->sorbetPreemptionsExpected = 2;
+        sendAsync(LSPMessage(make_unique<NotificationMessage>("2.0", LSPMethod::Initialized, move(initializedParams))));
+    }
+
+    //
+}*/
 
 // Run these tests in multi-threaded mode.
 INSTANTIATE_TEST_SUITE_P(MultithreadedProtocolTests, ProtocolTest, testing::Values(true));

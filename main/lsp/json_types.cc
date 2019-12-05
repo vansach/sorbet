@@ -221,7 +221,9 @@ void SorbetWorkspaceEditParams::merge(SorbetWorkspaceEditParams &newerParams) {
     }
     updates = move(newUpdates);
     mergeCount += newerParams.mergeCount + 1;
-    sorbetCancellationExpected = sorbetCancellationExpected || newerParams.sorbetCancellationExpected;
+    if (sorbetCancellationExpected == SorbetCancellationExpected::None) {
+        sorbetCancellationExpected = newerParams.sorbetCancellationExpected;
+    }
     sorbetPreemptionsExpected = sorbetPreemptionsExpected + newerParams.sorbetPreemptionsExpected;
 }
 

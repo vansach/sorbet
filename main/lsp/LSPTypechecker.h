@@ -40,7 +40,7 @@ struct LSPFileUpdates {
     std::optional<std::unique_ptr<core::GlobalState>> updatedGS;
 
     // [Tests-only] Used to force block update until canceled / preempted the given number of times.
-    bool cancellationExpected = false;
+    SorbetCancellationExpected cancellationExpected = SorbetCancellationExpected::None;
     int preemptionsExpected = 0;
 };
 

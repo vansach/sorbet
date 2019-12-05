@@ -259,7 +259,8 @@ unique_ptr<SorbetWorkspaceEditParams>
 LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<DidChangeTextDocumentParams> changeParams) const {
     auto edit = make_unique<SorbetWorkspaceEditParams>();
     edit->epoch = v;
-    edit->sorbetCancellationExpected = changeParams->sorbetCancellationExpected.value_or(false);
+    edit->sorbetCancellationExpected =
+        changeParams->sorbetCancellationExpected.value_or(SorbetCancellationExpected::None);
     edit->sorbetPreemptionsExpected = changeParams->sorbetPreemptionsExpected.value_or(0);
     string_view uri = changeParams->textDocument->uri;
     if (config->isUriInWorkspace(uri)) {

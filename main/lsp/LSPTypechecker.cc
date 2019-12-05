@@ -176,8 +176,8 @@ TypecheckRun LSPTypechecker::runFastPath(LSPFileUpdates updates, WorkerPool &wor
     ENFORCE(gs->lspTypecheckCount > 0,
             "Tried to run fast path with a GlobalState object that never had inferencer and resolver runs.");
     // This property is set to 'true' in tests only if the update is expected to take the slow path and get cancelled.
-    ENFORCE(!updates.cancellationExpected);
-    ENFORCE(!updates.preemptionsExpected);
+    ENFORCE(updates.cancellationExpected == SorbetCancellationExpected::None);
+    ENFORCE(updates.preemptionsExpected == 0);
     // This path only works for fast path updates.
     ENFORCE(updates.canTakeFastPath);
 
@@ -325,8 +325,8 @@ bool LSPTypechecker::runSlowPath(LSPFileUpdates updates, WorkerPool &workers, bo
         ENFORCE(gs->lspQuery.isEmpty());
         if (gs->sleepInSlowPath) {
             // Let cancelation occur during the sleep.
-            for (int i = 0; i < 300; i++) {
-                // 300*10 = 3000ms
+            for (int i = 0; i < 200; i++) {
+                // 200*10 = 2000ms
                 Timer::timedSleep(10ms, *logger, "slow_path.resolve.sleep");
                 if (gs->wasTypecheckingCanceled()) {
                     return;
@@ -344,6 +344,14 @@ bool LSPTypechecker::runSlowPath(LSPFileUpdates updates, WorkerPool &workers, bo
             affectedFiles.push_back(tree.file);
         }
 
+        // [TESTS ONLY] If a cancellation was expected, wait for it to happen.
+        if (updates.cancellationExpected == SorbetCancellationExpected::BeforeResolver) {
+            while (!gs->wasTypecheckingCanceled()) {
+                Timer::timedSleep(1ms, *logger, "slow_path.expected_cancellation.sleep");
+            }
+            return;
+        }
+
         // Inform the fast path that this global state is OK for typechecking as resolution has completed.
         gs->lspTypecheckCount++;
 
@@ -357,8 +365,8 @@ bool LSPTypechecker::runSlowPath(LSPFileUpdates updates, WorkerPool &workers, bo
 
         if (gs->sleepInSlowPath) {
             // Let preemption and cancelation occur during the sleep.
-            for (int i = 0; i < 300; i++) {
-                // 300*10 = 3000ms
+            for (int i = 0; i < 1000; i++) {
+                // 1000*10 = 10000ms
                 Timer::timedSleep(10ms, *logger, "slow_path.typecheck.sleep");
                 gs->tryRunPreemptionTask();
                 if (gs->wasTypecheckingCanceled()) {
@@ -368,7 +376,7 @@ bool LSPTypechecker::runSlowPath(LSPFileUpdates updates, WorkerPool &workers, bo
         }
 
         // [TESTS ONLY] If a cancellation was expected, wait for it to happen.
-        if (updates.cancellationExpected) {
+        if (updates.cancellationExpected == SorbetCancellationExpected::AfterResolver) {
             while (!gs->wasTypecheckingCanceled()) {
                 Timer::timedSleep(1ms, *logger, "slow_path.expected_cancellation.sleep");
             }

@@ -51,8 +51,10 @@ protected:
 
     std::unique_ptr<LSPMessage> closeFile(std::string_view path);
 
-    std::unique_ptr<LSPMessage> changeFile(std::string_view path, std::string_view newContents, int version,
-                                           bool cancellationExpected = false, int preemptionsExpected = 0);
+    std::unique_ptr<LSPMessage>
+    changeFile(std::string_view path, std::string_view newContents, int version,
+               SorbetCancellationExpected cancellationExpected = SorbetCancellationExpected::None,
+               int preemptionsExpected = 0);
 
     std::unique_ptr<LSPMessage> documentSymbol(std::string_view path);
 

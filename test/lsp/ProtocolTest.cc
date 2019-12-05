@@ -64,7 +64,8 @@ unique_ptr<LSPMessage> ProtocolTest::closeFile(string_view path) {
 }
 
 unique_ptr<LSPMessage> ProtocolTest::changeFile(string_view path, string_view newContents, int version,
-                                                bool cancellationExpected, int preemptionsExpected) {
+                                                SorbetCancellationExpected cancellationExpected,
+                                                int preemptionsExpected) {
     sourceFileContents[string(path)] =
         make_shared<core::File>(string(path), string(newContents), core::File::Type::Normal);
     return makeChange(getUri(path), newContents, version, cancellationExpected, preemptionsExpected);

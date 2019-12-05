@@ -813,13 +813,16 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
                                                      },
                                                      classTypes, {"std::string apply(std::string oldContents) const;"});
 
+    auto SorbetCancellationExpected = makeIntEnum(
+        "SorbetCancellationExpected", {{"None", 0}, {"BeforeResolver", 1}, {"AfterResolver", 2}}, enumTypes);
+
     auto DidChangeTextDocumentParams =
         makeObject("DidChangeTextDocumentParams",
                    {
                        makeField("textDocument", VersionedTextDocumentIdentifier),
                        makeField("contentChanges", makeArray(TextDocumentContentChangeEvent)),
                        // Used in tests only.
-                       makeField("sorbetCancellationExpected", makeOptional(JSONBool)),
+                       makeField("sorbetCancellationExpected", makeOptional(SorbetCancellationExpected)),
                        makeField("sorbetPreemptionsExpected", makeOptional(JSONInt)),
                    },
                    classTypes, {"std::string getSource(std::string_view oldFileContents) const;"});
@@ -1244,7 +1247,8 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
                    classTypes);
 
     // Empty object.
-    auto InitializedParams = makeObject("InitializedParams", {}, classTypes);
+    auto InitializedParams =
+        makeObject("InitializedParams", {makeField("sorbetPreemptionsExpected", makeOptional(JSONInt))}, classTypes);
 
     /* Sorbet LSP extensions */
     auto SorbetOperationStatus = makeStrEnum("SorbetOperationStatus", {"start", "end"}, enumTypes);
@@ -1278,7 +1282,7 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
             "u4 epoch = 0;",
             "u2 mergeCount = 0;",
             "// Used in multithreaded tests to wait for a cancellation to occur when processing this request.",
-            "bool sorbetCancellationExpected = false;"
+            "SorbetCancellationExpected sorbetCancellationExpected = SorbetCancellationExpected::None;"
             "// Used in multithreaded tests to wait for the expected number of preemptions to occur while processing "
             "this request",
             "int sorbetPreemptionsExpected = 0;",

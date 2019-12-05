@@ -214,7 +214,9 @@ LSPLoop::mergeUpdates(const LSPFileUpdates &older, const UnorderedMap<int, core:
         }
     }
     merged.canTakeFastPath = canTakeFastPath(*initialGS, *config, globalStateHashes, merged, combinedEvictions);
-    merged.cancellationExpected = older.cancellationExpected || newer.cancellationExpected;
+    merged.cancellationExpected = older.cancellationExpected != SorbetCancellationExpected::None
+                                      ? older.cancellationExpected
+                                      : newer.cancellationExpected;
     return make_pair<LSPFileUpdates, UnorderedMap<int, core::FileHash>>(move(merged), std::move(combinedEvictions));
 }
 
