@@ -929,7 +929,7 @@ ast::ParsedFilesOrCancelled resolve(unique_ptr<core::GlobalState> &gs, vector<as
 
 ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<ast::ParsedFile> what,
                                       const options::Options &opts, WorkerPool &workers, bool cancelable,
-                                      bool preemptible) {
+                                      bool preemptible, u4 epoch) {
     vector<ast::ParsedFile> typecheck_result;
 
     {
@@ -960,7 +960,7 @@ ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<
         {
             ProgressIndicator cfgInferProgress(opts.showProgress, "CFG+Inference", what.size());
             workers.multiplexJob("typecheck", [ctx, &opts, &typecheckMutex = gs->typecheckMutex, fileq, resultq,
-                                               cancelable, preemptible]() {
+                                               cancelable, preemptible, epoch]() {
                 typecheck_thread_result threadResult;
                 ast::ParsedFile job;
                 int processedByThread = 0;
@@ -976,8 +976,13 @@ ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<
                         }
                         if (result.gotItem()) {
                             processedByThread++;
-                            // Only do the work if typechecking hasn't been canceled.
-                            if (!cancelable || !ctx.state.wasTypecheckingCanceled()) {
+                            // [IDE] Only do the work if typechecking hasn't been canceled.
+                            const bool isCanceled = cancelable && ctx.state.wasTypecheckingCanceled();
+                            // [IDE] Also, don't do work if the file has changed under us since we began typechecking!
+                            // TODO(jvilk): epoch is unlikely to overflow, but it is theoretically possible.
+                            const bool fileWasTypecheckedDuringPreemption =
+                                preemptible && job.file.data(ctx).epoch > epoch;
+                            if (!isCanceled && !fileWasTypecheckedDuringPreemption) {
                                 core::FileRef file = job.file;
                                 try {
                                     threadResult.trees.emplace_back(typecheckOne(ctx, move(job), opts));

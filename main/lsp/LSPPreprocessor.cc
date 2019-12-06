@@ -268,7 +268,7 @@ LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<DidChangeTextDocumentParams>
         if (!config->isFileIgnored(localPath)) {
             string fileContents = changeParams->getSource(getFileContents(localPath));
             edit->updates.push_back(
-                make_shared<core::File>(move(localPath), move(fileContents), core::File::Type::Normal));
+                make_shared<core::File>(move(localPath), move(fileContents), core::File::Type::Normal, v));
         }
     }
     return edit;
@@ -283,7 +283,7 @@ LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<DidOpenTextDocumentParams> o
         string localPath = config->remoteName2Local(uri);
         if (!config->isFileIgnored(localPath)) {
             edit->updates.push_back(make_shared<core::File>(move(localPath), move(openParams->textDocument->text),
-                                                            core::File::Type::Normal));
+                                                            core::File::Type::Normal, v));
         }
     }
     return edit;
@@ -299,7 +299,7 @@ LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<DidCloseTextDocumentParams> 
         if (!config->isFileIgnored(localPath)) {
             // Use contents of file on disk.
             edit->updates.push_back(make_shared<core::File>(move(localPath), readFile(localPath, *config->opts.fs),
-                                                            core::File::Type::Normal));
+                                                            core::File::Type::Normal, v));
         }
     }
     return edit;
@@ -315,7 +315,7 @@ LSPPreprocessor::canonicalizeEdits(u4 v, unique_ptr<WatchmanQueryResponse> query
         // Editor contents supercede file system updates.
         if (!config->isFileIgnored(localPath) && !openFiles.contains(localPath)) {
             edit->updates.push_back(make_shared<core::File>(move(localPath), readFile(localPath, *config->opts.fs),
-                                                            core::File::Type::Normal));
+                                                            core::File::Type::Normal, v));
         }
     }
     return edit;
