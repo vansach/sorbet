@@ -969,7 +969,6 @@ ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<
                     for (auto result = fileq->try_pop(job); !result.done(); result = fileq->try_pop(job)) {
                         unique_ptr<absl::ReaderMutexLock> lock;
                         if (preemptible) {
-                            Timer::timedSleep(1000ms, ctx.state.tracer(), "sleep_for_lock");
                             // Acquire a reader lock here. Parks the thread if the typechecker thread is trying to
                             // grab the lock to preempt typechecking.
                             lock = make_unique<absl::ReaderMutexLock>(typecheckMutex.get());
@@ -980,9 +979,8 @@ ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<
                             const bool isCanceled = cancelable && ctx.state.wasTypecheckingCanceled();
                             // [IDE] Also, don't do work if the file has changed under us since we began typechecking!
                             // TODO(jvilk): epoch is unlikely to overflow, but it is theoretically possible.
-                            const bool fileWasTypecheckedDuringPreemption =
-                                preemptible && job.file.data(ctx).epoch > epoch;
-                            if (!isCanceled && !fileWasTypecheckedDuringPreemption) {
+                            const bool fileWasChanged = preemptible && job.file.data(ctx).epoch > epoch;
+                            if (!isCanceled && !fileWasChanged) {
                                 core::FileRef file = job.file;
                                 try {
                                     threadResult.trees.emplace_back(typecheckOne(ctx, move(job), opts));
