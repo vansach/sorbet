@@ -124,10 +124,6 @@ class LSPLoop {
      * and file hashes. */
     LSPFileUpdates commitEdit(SorbetWorkspaceEditParams &edit);
 
-    std::pair<LSPFileUpdates, UnorderedMap<int, core::FileHash>>
-    mergeUpdates(const LSPFileUpdates &older, const UnorderedMap<int, core::FileHash> &olderEvictions,
-                 const LSPFileUpdates &newer, const UnorderedMap<int, core::FileHash> &newerEvictions) const;
-
 public:
     LSPLoop(std::unique_ptr<core::GlobalState> initialGS, const std::shared_ptr<LSPConfiguration> &config,
             WorkerPool &workers);

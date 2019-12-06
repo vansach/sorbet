@@ -153,59 +153,8 @@ bool canTakeFastPath(
     return true;
 }
 
-LSPFileUpdates copy(const LSPFileUpdates &updates) {
-    LSPFileUpdates copy;
-    copy.epoch = updates.epoch;
-    copy.canTakeFastPath = updates.canTakeFastPath;
-    copy.editCount = updates.editCount;
-    copy.hasNewFiles = updates.hasNewFiles;
-    copy.updatedFiles = updates.updatedFiles;
-    copy.updatedFileHashes = updates.updatedFileHashes;
-    for (auto &ast : updates.updatedFileIndexes) {
-        copy.updatedFileIndexes.push_back(ast::ParsedFile{ast.tree->deepCopy(), ast.file});
-    }
-    return copy;
-}
-
-} // namespace
-
-pair<LSPFileUpdates, UnorderedMap<int, core::FileHash>>
-LSPLoop::mergeUpdates(const LSPFileUpdates &older, const UnorderedMap<int, core::FileHash> &olderEvictions,
-                      const LSPFileUpdates &newer, const UnorderedMap<int, core::FileHash> &newerEvictions) const {
-    LSPFileUpdates merged;
-    merged.epoch = newer.epoch;
-    merged.editCount = older.editCount + newer.editCount;
-    merged.hasNewFiles = older.hasNewFiles || newer.hasNewFiles;
-
-    ENFORCE(older.updatedFiles.size() == older.updatedFileHashes.size());
-    ENFORCE(older.updatedFiles.size() == older.updatedFileIndexes.size());
-    ENFORCE(newer.updatedFiles.size() == newer.updatedFileHashes.size());
-    ENFORCE(newer.updatedFiles.size() == newer.updatedFileIndexes.size());
-
-    // For updates, we prioritize _newer_ updates.
-    UnorderedSet<string> encountered;
-    int i = -1;
-    for (auto &f : newer.updatedFiles) {
-        i++;
-        encountered.emplace(f->path());
-        merged.updatedFiles.push_back(f);
-        merged.updatedFileHashes.push_back(newer.updatedFileHashes[i]);
-        auto &ast = newer.updatedFileIndexes[i];
-        merged.updatedFileIndexes.push_back(ast::ParsedFile{ast.tree->deepCopy(), ast.file});
-    }
-
-    i = -1;
-    for (auto &f : older.updatedFiles) {
-        i++;
-        if (!encountered.contains(f->path())) {
-            encountered.emplace(f->path());
-            merged.updatedFiles.push_back(f);
-            merged.updatedFileHashes.push_back(older.updatedFileHashes[i]);
-            auto &ast = older.updatedFileIndexes[i];
-            merged.updatedFileIndexes.push_back(ast::ParsedFile{ast.tree->deepCopy(), ast.file});
-        }
-    }
-
+UnorderedMap<int, core::FileHash> mergeEvictions(const UnorderedMap<int, core::FileHash> &olderEvictions,
+                                                 const UnorderedMap<int, core::FileHash> &newerEvictions) {
     // For evictions, which are needed for emulating an older globalStateHashes, we keep the oldest.
     UnorderedMap<int, core::FileHash> combinedEvictions = olderEvictions;
     for (auto &e : newerEvictions) {
@@ -213,14 +162,15 @@ LSPLoop::mergeUpdates(const LSPFileUpdates &older, const UnorderedMap<int, core:
             combinedEvictions[e.first] = e.second;
         }
     }
-    merged.canTakeFastPath = canTakeFastPath(*initialGS, *config, globalStateHashes, merged, combinedEvictions);
-    merged.cancellationExpected = older.cancellationExpected != SorbetCancellationExpected::None
-                                      ? older.cancellationExpected
-                                      : newer.cancellationExpected;
-    return make_pair<LSPFileUpdates, UnorderedMap<int, core::FileHash>>(move(merged), std::move(combinedEvictions));
+    return olderEvictions;
 }
 
+} // namespace
+
+// merged.canTakeFastPath = canTakeFastPath(*initialGS, *config, globalStateHashes, merged, combinedEvictions);
+
 LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
+    // TODO: Convert into a helper function.
     auto workers = WorkerPool::create(0, *config->logger);
     LSPFileUpdates update;
     update.epoch = edit.epoch;
@@ -262,29 +212,36 @@ LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
     // Index changes. pipeline::index sorts output by file id, but we need to reorder to match the order of other
     // fields.
     UnorderedMap<u2, int> fileToPos;
-    int i = -1;
-    for (auto fref : frefs) {
-        // We should have ensured before reaching here that there are no duplicates.
-        ENFORCE(!fileToPos.contains(fref.id()));
-        i++;
-        fileToPos[fref.id()] = i;
+    {
+        int i = -1;
+        for (auto fref : frefs) {
+            // We should have ensured before reaching here that there are no duplicates.
+            ENFORCE(!fileToPos.contains(fref.id()));
+            i++;
+            fileToPos[fref.id()] = i;
+        }
     }
 
-    auto trees = pipeline::index(initialGS, frefs, config->opts, *workers, kvstore);
-    initialGS->errorQueue->drainWithQueryResponses(); // Clear error queue; we don't care about errors here.
-    update.updatedFileIndexes.resize(trees.size());
-    for (auto &ast : trees) {
-        const int i = fileToPos[ast.file.id()];
-        update.updatedFileIndexes[i] = move(ast);
+    {
+        auto trees = pipeline::index(initialGS, frefs, config->opts, *workers, kvstore);
+        initialGS->errorQueue->drainWithQueryResponses(); // Clear error queue; we don't care about errors here.
+        update.updatedFileIndexes.resize(trees.size());
+        for (auto &ast : trees) {
+            const int i = fileToPos[ast.file.id()];
+            update.updatedFileIndexes[i] = move(ast);
+        }
     }
 
     // TODO(jvilk): We could make this smarter and avoid work if the slow path _isn't_ running.
+    // TODO(jvilk): If not running slow path AND this is not a slow path update, no need to do _anything_.
     auto runningSlowPath = initialGS->getRunningSlowPath();
     if (runningSlowPath.has_value()) {
         // A cancelable slow path is currently running. Before running deepCopy(), check if we can cancel -- we might be
         // able to avoid it.
-        auto [merged, mergedEvictions] =
-            mergeUpdates(pendingTypecheckUpdates, pendingTypecheckEvictedStateHashes, update, evictedHashes);
+        auto merged = update.copy();
+        merged.mergeInto(pendingTypecheckUpdates);
+        auto mergedEvictions = mergeEvictions(pendingTypecheckEvictedStateHashes, evictedHashes);
+        merged.canTakeFastPath = canTakeFastPath(*initialGS, *config, globalStateHashes, merged, mergedEvictions);
         // Cancel if old + new takes fast path, or if the new update will take the slow path anyway.
         if ((merged.canTakeFastPath || !update.canTakeFastPath) && initialGS->tryCancelSlowPath(merged.epoch)) {
             // Cancelation succeeded! Use `merged` as the update.
@@ -300,15 +257,14 @@ LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
     // Completely replace `pendingTypecheckUpdates` if this was a slow path update.
     if (!update.canTakeFastPath) {
         update.updatedGS = initialGS->deepCopy();
-        pendingTypecheckUpdates = copy(update);
+        pendingTypecheckUpdates = update.copy();
         pendingTypecheckEvictedStateHashes = std::move(evictedHashes);
     } else {
         // Edit takes the fast path. Merge with this edit so we can reverse it if the slow path gets canceled.
-        // TODO(jvilk): We could be smarter and do less work if we also implemented an in-place merge, or avoided
-        // merging if update canceled the slow path.
-        // TODO(jvilk) 2: This also runs "canTakeFastPath" a second time. Let's fix after putting tests in place.
-        auto [merged, mergedEvictions] =
-            mergeUpdates(pendingTypecheckUpdates, pendingTypecheckEvictedStateHashes, update, evictedHashes);
+        // Note: No need to run canTakeFastPath.
+        auto merged = update.copy();
+        merged.mergeInto(pendingTypecheckUpdates);
+        auto mergedEvictions = mergeEvictions(pendingTypecheckEvictedStateHashes, evictedHashes);
         pendingTypecheckUpdates = move(merged);
         pendingTypecheckEvictedStateHashes = std::move(mergedEvictions);
     }

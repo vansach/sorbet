@@ -24,9 +24,14 @@ void LSPTypecheckerCoordinator::asyncRunInternal(std::shared_ptr<Task> task) {
 }
 
 void LSPTypecheckerCoordinator::asyncRun(function<void(LSPTypechecker &, WorkerPool &workers)> &&lambda) {
-    asyncRunInternal(make_shared<Task>([&typechecker = this->typechecker, &workers = this->workers, lambda]() -> void {
-        lambda(typechecker, workers);
-    }));
+    auto notification = make_shared<absl::Notification>();
+    asyncRunInternal(
+        make_shared<Task>([notification, &typechecker = this->typechecker, &workers = this->workers, lambda]() -> void {
+            notification->Notify();
+            lambda(typechecker, workers);
+        }));
+    // Wait for task to start running before returning. Maintains invariant that only one async task is running at once.
+    notification->WaitForNotification();
 }
 
 void LSPTypecheckerCoordinator::syncRunPreempt(function<void(LSPTypechecker &)> &&lambda,

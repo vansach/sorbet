@@ -39,6 +39,51 @@ void sendTypecheckInfo(const LSPConfiguration &config, const core::GlobalState &
 }
 } // namespace
 
+void LSPFileUpdates::mergeInto(const LSPFileUpdates &older) {
+    editCount += older.editCount;
+    hasNewFiles = hasNewFiles || older.hasNewFiles;
+    cancellationExpected =
+        cancellationExpected != SorbetCancellationExpected::None ? cancellationExpected : older.cancellationExpected;
+
+    ENFORCE(updatedFiles.size() == updatedFileHashes.size());
+    ENFORCE(updatedFiles.size() == updatedFileIndexes.size());
+    ENFORCE(older.updatedFiles.size() == older.updatedFileHashes.size());
+    ENFORCE(older.updatedFiles.size() == older.updatedFileIndexes.size());
+
+    // For updates, we prioritize _newer_ updates.
+    UnorderedSet<string> encountered;
+    for (auto &f : updatedFiles) {
+        encountered.emplace(f->path());
+    }
+
+    int i = -1;
+    for (auto &f : older.updatedFiles) {
+        i++;
+        if (encountered.contains(f->path())) {
+            continue;
+        }
+        encountered.emplace(f->path());
+        updatedFiles.push_back(f);
+        updatedFileHashes.push_back(older.updatedFileHashes[i]);
+        auto &ast = older.updatedFileIndexes[i];
+        updatedFileIndexes.push_back(ast::ParsedFile{ast.tree->deepCopy(), ast.file});
+    }
+}
+
+LSPFileUpdates LSPFileUpdates::copy() const {
+    LSPFileUpdates copy;
+    copy.epoch = epoch;
+    copy.canTakeFastPath = canTakeFastPath;
+    copy.editCount = editCount;
+    copy.hasNewFiles = hasNewFiles;
+    copy.updatedFiles = updatedFiles;
+    copy.updatedFileHashes = updatedFileHashes;
+    for (auto &ast : updatedFileIndexes) {
+        copy.updatedFileIndexes.push_back(ast::ParsedFile{ast.tree->deepCopy(), ast.file});
+    }
+    return copy;
+}
+
 LSPTypechecker::UndoState::UndoState(unique_ptr<core::GlobalState> oldGS,
                                      UnorderedMap<int, ast::ParsedFile> oldIndexedFinalGS,
                                      vector<core::FileRef> oldFilesThatHaveErrors)
@@ -111,6 +156,21 @@ void LSPTypechecker::initialize(LSPFileUpdates updates, WorkerPool &workers) {
     ENFORCE(committed);
 }
 
+LSPFileUpdates LSPTypechecker::getNoopUpdate(std::vector<core::FileRef> frefs) const {
+    LSPFileUpdates noop;
+    // Epoch isn't important for this update.
+    noop.epoch = 0;
+    // This isn't a user edit, so don't count it as such.
+    noop.editCount = 0;
+    for (auto fref : frefs) {
+        auto &index = getIndexed(fref);
+        noop.updatedFileIndexes.push_back({index.tree->deepCopy(), index.file});
+        noop.updatedFiles.push_back(gs->getFiles()[fref.id()]);
+        noop.updatedFileHashes.push_back(globalStateHashes[fref.id()]);
+    }
+    return noop;
+}
+
 bool LSPTypechecker::typecheck(LSPFileUpdates updates, WorkerPool &workers) {
     vector<core::FileRef> addToTypecheck;
     if (updates.canceledSlowPath) {
@@ -121,15 +181,7 @@ bool LSPTypechecker::typecheck(LSPFileUpdates updates, WorkerPool &workers) {
             // This is the typecheck that caused us to cancel the previous slow path. Un-commit all typechecker changes.
             auto oldFilesWithErrors = restore(cancellationUndoState.value());
             cancellationUndoState = nullopt;
-            // Retypecheck any files returned by restore that aren't already in this update.
-            vector<core::FileRef> newUpdatedFiles;
-            for (auto &tree : updates.updatedFileIndexes) {
-                newUpdatedFiles.push_back(tree.file);
-            }
-            fast_sort(newUpdatedFiles);
-            fast_sort(oldFilesWithErrors);
-            std::set_difference(oldFilesWithErrors.begin(), oldFilesWithErrors.end(), newUpdatedFiles.begin(),
-                                newUpdatedFiles.end(), std::inserter(addToTypecheck, addToTypecheck.begin()));
+            updates.mergeInto(getNoopUpdate(oldFilesWithErrors));
         }
     }
 
@@ -138,13 +190,6 @@ bool LSPTypechecker::typecheck(LSPFileUpdates updates, WorkerPool &workers) {
     const bool isFastPath = updates.canTakeFastPath;
     sendTypecheckInfo(*config, *gs, SorbetTypecheckRunStatus::Started, isFastPath, {});
     if (updates.canTakeFastPath) {
-        // Retypecheck all files that formerly had errors.
-        for (auto fref : addToTypecheck) {
-            auto &index = getIndexed(fref);
-            updates.updatedFileIndexes.push_back({index.tree->deepCopy(), index.file});
-            updates.updatedFiles.push_back(gs->getFiles()[fref.id()]);
-            updates.updatedFileHashes.push_back(globalStateHashes[fref.id()]);
-        }
         auto run = runFastPath(move(updates), workers);
         filesTypechecked = run.filesTypechecked;
         commitTypecheckRun(move(run));

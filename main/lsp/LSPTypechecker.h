@@ -20,20 +20,22 @@ struct LSPQueryResult {
 /**
  * Encapsulates an update to LSP's file state in a compact form.
  */
-struct LSPFileUpdates {
+class LSPFileUpdates {
+public:
     // This specific update contains edits with id epoch.
     u4 epoch = 0;
     // The total number of edits that this update represents. Used for stats.
     u2 editCount = 0;
     std::vector<std::shared_ptr<core::File>> updatedFiles;
+    std::vector<core::FileHash> updatedFileHashes;
+    std::vector<ast::ParsedFile> updatedFileIndexes;
+
     bool canTakeFastPath = false;
     // Indicates that this update contains a new file. Is a hack for determining if combining two updates can take the
     // fast path.
     bool hasNewFiles = false;
     // If true, this update caused a slow path to be canceled.
     bool canceledSlowPath = false;
-    std::vector<core::FileHash> updatedFileHashes;
-    std::vector<ast::ParsedFile> updatedFileIndexes;
     // Updated on typechecking thread. Contains indexes processed with typechecking global state.
     std::vector<ast::ParsedFile> updatedFinalGSFileIndexes;
     // (Optional) Updated global state object to use to typecheck this update.
@@ -42,6 +44,16 @@ struct LSPFileUpdates {
     // [Tests-only] Used to force block update until canceled / preempted the given number of times.
     SorbetCancellationExpected cancellationExpected = SorbetCancellationExpected::None;
     int preemptionsExpected = 0;
+
+    /**
+     * Merges the given (and older) LSPFileUpdates object into this LSPFileUpdates object.
+     */
+    void mergeInto(const LSPFileUpdates &older);
+
+    /**
+     * Returns a copy of this LSPFileUpdates object.
+     */
+    LSPFileUpdates copy() const;
 };
 
 class TypecheckRun final {
@@ -148,6 +160,11 @@ class LSPTypechecker final {
      * error lists.
      */
     std::vector<core::FileRef> restore(UndoState &undoState);
+
+    /**
+     * Creates an LSPFileUpdates object containing the latest version of the given files (which is a no-op file update).
+     */
+    LSPFileUpdates getNoopUpdate(std::vector<core::FileRef> frefs) const;
 
 public:
     LSPTypechecker(std::shared_ptr<const LSPConfiguration> config);

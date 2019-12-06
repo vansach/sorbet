@@ -1517,8 +1517,10 @@ bool GlobalState::tryCancelSlowPath(u4 newEpoch) const {
     const u4 processing = currentlyProcessingLSPEpoch->load();
     ENFORCE(newEpoch != processing); // This would prevent a cancelation from happening.
     const u4 committed = lastCommittedLSPEpoch->load();
-    // The second condition should never happen, but guard against it in production.
-    if (processing == committed || newEpoch == processing) {
+    // We don't support canceling *twice*.
+    const bool alreadyCanceled = processing != lspEpochInvalidator->load();
+    // The third condition should never happen, but guard against it in production.
+    if (alreadyCanceled || processing == committed || newEpoch == processing) {
         return false;
     }
     // Cancel slow path by bumping invalidator.
