@@ -28,11 +28,8 @@ vector<string> frefsToPaths(const core::GlobalState &gs, const vector<core::File
 void sendTypecheckInfo(const LSPConfiguration &config, const core::GlobalState &gs, SorbetTypecheckRunStatus status,
                        bool isFastPath, std::vector<core::FileRef> filesTypechecked) {
     if (config.getClientConfig().enableTypecheckInfo) {
-        vector<string> filePaths;
-        for (auto &file : filesTypechecked) {
-            filePaths.emplace_back(file.data(gs).path());
-        }
-        auto sorbetTypecheckInfo = make_unique<SorbetTypecheckRunInfo>(status, isFastPath, filePaths);
+        auto sorbetTypecheckInfo =
+            make_unique<SorbetTypecheckRunInfo>(status, isFastPath, frefsToPaths(gs, filesTypechecked));
         config.output->write(make_unique<LSPMessage>(
             make_unique<NotificationMessage>("2.0", LSPMethod::SorbetTypecheckRunInfo, move(sorbetTypecheckInfo))));
     }
@@ -687,21 +684,9 @@ LSPQueryResult LSPTypechecker::queryMultithreaded(const core::lsp::Query &q,
     return LSPQueryResult{move(out.second)};
 }
 
-TypecheckRun LSPTypechecker::retypecheck(LSPFileUpdates updates) const {
-    if (!updates.canTakeFastPath) {
-        Exception::raise("Tried to typecheck slow path updates with retypecheck. Retypecheck can only typecheck the "
-                         "previously typechecked version of a file.");
-    }
-
-    for (const auto &file : updates.updatedFiles) {
-        auto path = file->path();
-        auto source = file->source();
-        auto fref = gs->findFileByPath(path);
-        if (!fref.exists() || fref.data(*gs).source() != source) {
-            Exception::raise("Retypecheck can only typecheck the previously typechecked version of a file.");
-        }
-    }
-
+TypecheckRun LSPTypechecker::retypecheck(vector<core::FileRef> frefs) const {
+    LSPFileUpdates updates = getNoopUpdate(move(frefs));
+    updates.canTakeFastPath = true;
     auto workers = WorkerPool::create(0, *config->logger);
     return runFastPath(move(updates), *workers);
 }
@@ -751,6 +736,11 @@ TypecheckRun TypecheckRun::makeCanceled() {
     TypecheckRun run;
     run.canceled = true;
     return run;
+}
+
+void LSPTypechecker::startCommitEpoch(u4 epoch) const {
+    ENFORCE(gs->getRunningSlowPath() == nullopt);
+    gs->startCommitEpoch(epoch);
 }
 
 } // namespace sorbet::realmain::lsp

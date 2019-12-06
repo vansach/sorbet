@@ -23,14 +23,23 @@ void LSPTypecheckerCoordinator::asyncRunInternal(std::shared_ptr<Task> task) {
     }
 }
 
-void LSPTypecheckerCoordinator::asyncRun(function<void(LSPTypechecker &, WorkerPool &workers)> &&lambda) {
+void LSPTypecheckerCoordinator::typecheckAsync(shared_ptr<LSPFileUpdates> updates) {
+    // Just to be memory-safe, let's make this a shared ptr so the lambda can share ownership.
     auto notification = make_shared<absl::Notification>();
-    asyncRunInternal(
-        make_shared<Task>([notification, &typechecker = this->typechecker, &workers = this->workers, lambda]() -> void {
+    asyncRunInternal(make_shared<Task>(
+        [&typechecker = this->typechecker, &workers = this->workers, notification, updates]() -> void {
+            // Slow path (non-blocking so we can cancel it). Tell globalstate that we're starting a change
+            // that can be canceled before passing off the lambda.
+            typechecker.startCommitEpoch(updates->epoch);
             notification->Notify();
-            lambda(typechecker, workers);
+            const u4 merged = updates->editCount - 1;
+            // Only report stats if the edit was committed.
+            if (!typechecker.typecheck(move(*updates), workers)) {
+                prodCategoryCounterInc("lsp.messages.processed", "sorbet/workspaceEdit");
+                prodCategoryCounterAdd("lsp.messages.processed", "sorbet/mergedEdits", merged);
+            }
         }));
-    // Wait for task to start running before returning. Maintains invariant that only one async task is running at once.
+    // To avoid race conditions, wait until the commit epoch begins.
     notification->WaitForNotification();
 }
 

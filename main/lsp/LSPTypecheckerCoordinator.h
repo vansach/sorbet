@@ -42,9 +42,10 @@ public:
     LSPTypecheckerCoordinator(const std::shared_ptr<const LSPConfiguration> &config, WorkerPool &workers);
 
     /**
-     * Runs lambda with exclusive access to typechecker. lambda runs on typechecker thread.
+     * Typechecks the given file asynchronously on the slow path with exclusive access to typechecker. Returns when
+     * typechecking has begun.
      */
-    void asyncRun(std::function<void(LSPTypechecker &, WorkerPool &)> &&lambda);
+    void typecheckAsync(std::shared_ptr<LSPFileUpdates> updates);
 
     /**
      * Like asyncRun, but:

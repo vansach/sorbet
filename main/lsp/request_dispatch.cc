@@ -1,3 +1,4 @@
+#include "absl/synchronization/notification.h"
 #include "common/Timer.h"
 #include "core/Unfreeze.h"
 #include "main/lsp/LSPOutput.h"
@@ -162,12 +163,10 @@ UnorderedMap<int, core::FileHash> mergeEvictions(const UnorderedMap<int, core::F
             combinedEvictions[e.first] = e.second;
         }
     }
-    return olderEvictions;
+    return combinedEvictions;
 }
 
 } // namespace
-
-// merged.canTakeFastPath = canTakeFastPath(*initialGS, *config, globalStateHashes, merged, combinedEvictions);
 
 LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
     // TODO: Convert into a helper function.
@@ -327,17 +326,7 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
                     },
                     *initialGS);
             } else {
-                // Slow path (non-blocking so we can cancel it). Tell globalstate that we're starting a change that can
-                // be canceled before passing off the lambda.
-                initialGS->startCommitEpoch(updates->epoch);
-                typecheckerCoord.asyncRun([updates](LSPTypechecker &typechecker, WorkerPool &workers) -> void {
-                    const u4 merged = updates->editCount - 1;
-                    // Only report stats if the edit was committed.
-                    if (!typechecker.typecheck(move(*updates), workers)) {
-                        prodCategoryCounterInc("lsp.messages.processed", "sorbet/workspaceEdit");
-                        prodCategoryCounterAdd("lsp.messages.processed", "sorbet/mergedEdits", merged);
-                    }
-                });
+                typecheckerCoord.typecheckAsync(updates);
             }
         } else if (method == LSPMethod::Initialized) {
             prodCategoryCounterInc("lsp.messages.processed", "initialized");

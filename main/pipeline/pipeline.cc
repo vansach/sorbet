@@ -969,7 +969,7 @@ ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<
                     for (auto result = fileq->try_pop(job); !result.done(); result = fileq->try_pop(job)) {
                         unique_ptr<absl::ReaderMutexLock> lock;
                         if (preemptible) {
-                            // Timer::timedSleep(10000ms, ctx.state.tracer(), "sleep_for_lock");
+                            Timer::timedSleep(1000ms, ctx.state.tracer(), "sleep_for_lock");
                             // Acquire a reader lock here. Parks the thread if the typechecker thread is trying to
                             // grab the lock to preempt typechecking.
                             lock = make_unique<absl::ReaderMutexLock>(typecheckMutex.get());

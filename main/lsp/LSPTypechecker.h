@@ -194,7 +194,7 @@ public:
      * Re-typechecks the provided input to re-produce error messages. Input *must* match already committed state!
      * Provided to facilitate code actions.
      */
-    TypecheckRun retypecheck(LSPFileUpdates updates) const;
+    TypecheckRun retypecheck(std::vector<core::FileRef> files) const;
 
     /** Runs the provided query against the given files, and returns matches. */
     LSPQueryResult query(const core::lsp::Query &q, const std::vector<core::FileRef> &filesForQuery) const;
@@ -232,6 +232,11 @@ public:
      * Returns the typechecker's internal global state, which effectively destroys the typechecker for further use.
      */
     std::unique_ptr<core::GlobalState> destroy();
+
+    /**
+     * (Internal use only) Marks the intention to typecheck the given epoch on the slow path.
+     */
+    void startCommitEpoch(u4 epoch) const;
 };
 
 } // namespace sorbet::realmain::lsp

@@ -1485,10 +1485,9 @@ bool GlobalState::wasModified() const {
 }
 
 bool GlobalState::wasTypecheckingCanceled() const {
-    // Can't cancel typechecking if GlobalState is preempted before resolver -- the preemptFunction requires resolver to
-    // have run.
-    return lspEpochInvalidator->load() != currentlyProcessingLSPEpoch->load() &&
-           (!atomic_load(preemptTask.get()) || lspTypecheckCount > 0);
+    // Can't cancel typechecking if we have a preemption task to run -- we have to make it past resolver at least before
+    // we can cancel.
+    return lspEpochInvalidator->load() != currentlyProcessingLSPEpoch->load() && !atomic_load(preemptTask.get());
 }
 
 void GlobalState::startCommitEpoch(u4 newEpoch) {
@@ -1519,8 +1518,9 @@ bool GlobalState::tryCancelSlowPath(u4 newEpoch) const {
     const u4 committed = lastCommittedLSPEpoch->load();
     // We don't support canceling *twice*.
     const bool alreadyCanceled = processing != lspEpochInvalidator->load();
+    const bool noSlowPathRunning = processing == committed;
     // The third condition should never happen, but guard against it in production.
-    if (alreadyCanceled || processing == committed || newEpoch == processing) {
+    if (alreadyCanceled || noSlowPathRunning || newEpoch == processing) {
         return false;
     }
     // Cancel slow path by bumping invalidator.
@@ -1529,14 +1529,19 @@ bool GlobalState::tryCancelSlowPath(u4 newEpoch) const {
 }
 
 bool GlobalState::tryPreempt(shared_ptr<PreemptionTask> task) {
+    // Need to grab epochMutex so we have accurate information w.r.t. if typechecking is happening / if typechecking was
+    // canceled.
     absl::MutexLock lock(epochMutex.get());
     const u4 processing = currentlyProcessingLSPEpoch->load();
     const u4 committed = lastCommittedLSPEpoch->load();
+    const u4 invalidator = lspEpochInvalidator->load();
+    const bool noSlowPathRunning = processing == committed;
+    const bool alreadyCanceled = processing != invalidator;
 
     // The code should only ever set one preempt function.
     auto existingTask = atomic_load(preemptTask.get());
     ENFORCE(!existingTask);
-    if (processing == committed || wasTypecheckingCanceled() || existingTask) {
+    if (noSlowPathRunning || alreadyCanceled || existingTask) {
         // No slow path running, typechecking was canceled so we can't preempt the canceled slow path, or a task is
         // already scheduled. The latter should _never_ occur.
         return false;
