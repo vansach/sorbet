@@ -14,7 +14,7 @@ public:
     // [IDE] We want blocking operations to be more responsive to preemption requests.
     inline static constexpr std::chrono::milliseconds PREEMPTION_BLOCK_INTERVAL() {
         using namespace std::chrono_literals;
-        return 50ms;
+        return 20ms;
     }
     typedef std::function<void()> Task;
     static std::unique_ptr<WorkerPool> create(int size, spd::logger &logger);
