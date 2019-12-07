@@ -425,7 +425,7 @@ bool LSPTypechecker::runSlowPath(LSPFileUpdates updates, WorkerPool &workers, bo
             return;
         }
 
-        pipeline::typecheck(gs, move(resolved), config->opts, workers, cancelable, preemptible);
+        pipeline::typecheck(gs, move(resolved), config->opts, workers, cancelable, preemptible, updates.epoch);
     });
 
     // Note: This is important to do even if the slow path was canceled. It clears out any typechecking errors from the
