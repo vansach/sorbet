@@ -1001,9 +1001,10 @@ ast::ParsedFilesOrCancelled typecheck(unique_ptr<core::GlobalState> &gs, vector<
 
             typecheck_thread_result threadResult;
             {
-                for (auto result = resultq->wait_pop_timed(threadResult, WorkerPool::BLOCK_INTERVAL(), gs->tracer());
-                     !result.done();
-                     result = resultq->wait_pop_timed(threadResult, WorkerPool::BLOCK_INTERVAL(), gs->tracer())) {
+                const auto blockInterval =
+                    preemptible ? WorkerPool::PREEMPTION_BLOCK_INTERVAL() : WorkerPool::BLOCK_INTERVAL();
+                for (auto result = resultq->wait_pop_timed(threadResult, blockInterval, gs->tracer()); !result.done();
+                     result = resultq->wait_pop_timed(threadResult, blockInterval, gs->tracer())) {
                     if (result.gotItem()) {
                         counterConsume(move(threadResult.counters));
                         typecheck_result.insert(typecheck_result.end(), make_move_iterator(threadResult.trees.begin()),
