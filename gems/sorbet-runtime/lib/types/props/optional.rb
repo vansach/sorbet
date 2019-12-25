@@ -33,7 +33,7 @@ module T::Props::Optional::DecoratorMethods
 
   def mutate_prop_backdoor!(prop, key, value)
     rules = props.fetch(prop)
-    rules = rules.merge(key => value)
+    rules = rules.set(key, value)
     compute_derived_rules(rules)
     @props = props.merge(prop => rules.freeze).freeze
   end
