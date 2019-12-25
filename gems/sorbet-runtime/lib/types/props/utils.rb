@@ -45,12 +45,12 @@ module T::Props::Utils
 
   def self.required_prop?(prop_rules)
     # Clients should never reference :_tnilable as the implementation can change.
-    !prop_rules._tnilable
+    !prop_rules[:_tnilable]
   end
 
   def self.optional_prop?(prop_rules)
     # Clients should never reference :_tnilable as the implementation can change.
-    !!prop_rules._tnilable
+    !!prop_rules[:_tnilable]
   end
 
   def self.merge_serialized_optional_rule(prop_rules)
