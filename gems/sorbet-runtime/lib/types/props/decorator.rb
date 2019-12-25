@@ -97,10 +97,17 @@ class T::Props::Decorator
       instance_variable_get("@#{key}".to_sym)
     end
 
-    def fetch(key)
-      value = self[key]
-      raise KeyError.new("key not found: \"#{key}\"") unless key?(key)
-      value
+    def fetch(key, *default)
+      raise ArgumentError.new("wrong number of arguments (given 0, expected 1..2)") if default.length > 1
+
+      key_set = include?(key)
+      if key_set
+        self[key]
+      elsif default.length == 1
+        default[0]
+      else
+        raise KeyError.new("key not found: \"#{key}\"")
+      end
     end
   end
 
