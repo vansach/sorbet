@@ -24,5 +24,6 @@
   },
   "[ruby]": {
     "editor.tabSize": 2
-  }
+  },
+  "ruby.rubocop.suppressRubocopWarnings": true
 }

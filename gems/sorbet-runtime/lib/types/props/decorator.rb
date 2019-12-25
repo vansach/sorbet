@@ -78,6 +78,16 @@ class T::Props::Decorator
     # The remainder of these methods are included primarily to preserve relative
     # backwards-compatibility with the old raw hash implementation.
 
+    def dig(*keys)
+      raise ArgumentError.new("wrong number of arguments (given 0, expected 1+)") if keys.length < 1
+      value = self[keys[0]]
+      if value.nil? || keys.length == 1
+        value
+      else
+        value.dig(*keys[1..])
+      end
+    end
+
     def key?(key)
       include?(key)
     end
