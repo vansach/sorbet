@@ -97,6 +97,14 @@ class T::Props::Decorator
       instance_variable_get("@#{key}".to_sym)
     end
 
+    def merge(hash)
+      new_rules = dup
+      hash.each do |key, value|
+        new_rules.set!(key, value)
+      end
+      new_rules
+    end
+
     def fetch(key, *default)
       raise ArgumentError.new("wrong number of arguments (given 0, expected 1..2)") if default.length > 1
 
