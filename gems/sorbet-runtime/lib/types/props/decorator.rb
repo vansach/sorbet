@@ -117,6 +117,13 @@ class T::Props::Decorator
         raise KeyError.new("key not found: \"#{key}\"")
       end
     end
+
+    def to_h
+      instance_variables
+        .map {|k| k.to_s.delete("@").to_sym}
+        .map {|k| [k, self[k]]}
+        .to_h
+    end
   end
 
   RulesHash = T.type_alias {T::Hash[Symbol, T.untyped]}
