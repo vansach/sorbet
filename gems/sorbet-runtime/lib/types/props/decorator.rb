@@ -121,7 +121,7 @@ class T::Props::Decorator
   sig {params(prop: Symbol, key: Symbol, value: T.untyped).void}
   def mutate_prop_backdoor!(prop, key, value)
     @props = props.merge(
-      prop => props.fetch(prop).set(key, value),
+      prop => props.fetch(prop).set(key, value).freeze,
     ).freeze
   end
 
@@ -142,7 +142,7 @@ class T::Props::Decorator
       raise ArgumentError.new("Attempted to override a prop #{prop.inspect} that doesn't already exist")
     end
 
-    @props = @props.merge(prop => rules.delete(:override)).freeze
+    @props = @props.merge(prop => rules.delete(:override).freeze).freeze
     rules
   end
 
