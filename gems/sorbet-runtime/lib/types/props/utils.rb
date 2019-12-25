@@ -35,7 +35,7 @@ module T::Props::Utils
   # This is mostly for the compatibility check that we allow existing documents carry some nil prop/field.
   def self.need_nil_read_check?(prop_rules)
     # . :on_load allows nil read, but we need to check for the read for future writes
-    prop_rules[:optional] == :on_load || prop_rules[:raise_on_nil_write]
+    prop_rules.optional == :on_load || prop_rules.raise_on_nil_write
   end
 
   # The prop_rules indicate whether we should check for writing a nil value for the prop/field.
@@ -45,12 +45,12 @@ module T::Props::Utils
 
   def self.required_prop?(prop_rules)
     # Clients should never reference :_tnilable as the implementation can change.
-    !prop_rules[:_tnilable]
+    !prop_rules._tnilable
   end
 
   def self.optional_prop?(prop_rules)
     # Clients should never reference :_tnilable as the implementation can change.
-    !!prop_rules[:_tnilable]
+    !!prop_rules._tnilable
   end
 
   def self.merge_serialized_optional_rule(prop_rules)

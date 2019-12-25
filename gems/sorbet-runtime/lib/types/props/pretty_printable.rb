@@ -75,14 +75,14 @@ module T::Props::PrettyPrintable
     private def inspect_prop_value(instance, prop, multiline:, indent:)
       val = T.unsafe(self).get(instance, prop)
       rules = T.unsafe(self).prop_rules(prop)
-      if (custom_inspect = rules[:inspect])
+      if (custom_inspect = rules.inspect)
         if T::Utils.arity(custom_inspect) == 1
           custom_inspect.call(val)
         else
           custom_inspect.call(val, {multiline: multiline, indent: indent})
         end
-      elsif rules[:sensitivity] && !rules[:sensitivity].empty? && !val.nil?
-        "<REDACTED #{rules[:sensitivity].join(', ')}>"
+      elsif rules.sensitivity && !rules.sensitivity.empty? && !val.nil?
+        "<REDACTED #{rules.sensitivity.join(', ')}>"
       else
         val.inspect
       end

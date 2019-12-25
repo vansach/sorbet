@@ -20,17 +20,17 @@ module T::Props::TypeValidation
       params(
         name: T.any(Symbol, String),
         _cls: Module,
-        rules: T::Hash[Symbol, T.untyped],
+        rules_hash: T::Hash[Symbol, T.untyped],
         type: T.any(T::Types::Base, Module)
       )
       .void
     end
-    def prop_validate_definition!(name, _cls, rules, type)
+    def prop_validate_definition!(name, _cls, rules_hash, type)
       super
 
-      if !rules[:DEPRECATED_underspecified_type] && !(type.singleton_class <= T::Props::CustomType)
+      if !rules_hash[:DEPRECATED_underspecified_type] && !(type.singleton_class <= T::Props::CustomType)
         validate_type(type, field_name: name)
-      elsif rules[:DEPRECATED_underspecified_type] && find_invalid_subtype(type).nil?
+      elsif rules_hash[:DEPRECATED_underspecified_type] && find_invalid_subtype(type).nil?
         raise ArgumentError.new("DEPRECATED_underspecified_type set unnecessarily for #{@class.name}.#{name} - #{type} is a valid type")
       end
     end

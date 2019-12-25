@@ -29,7 +29,7 @@ module T::Props::Optional::DecoratorMethods
     ]
   end
 
-  def prop_optional?(prop); prop_rules(prop)[:fully_optional]; end
+  def prop_optional?(prop); prop_rules(prop).fully_optional; end
 
   def mutate_prop_backdoor!(prop, key, value)
     rules = props.fetch(prop)
@@ -39,8 +39,9 @@ module T::Props::Optional::DecoratorMethods
   end
 
   def compute_derived_rules(rules)
-    rules[:fully_optional] = !T::Props::Utils.need_nil_write_check?(rules)
-    rules[:need_nil_read_check] = T::Props::Utils.need_nil_read_check?(rules)
+    rules
+      .set_attr(:fully_optional, !T::Props::Utils.need_nil_write_check?(rules))
+      .set_attr(:need_nil_read_check, T::Props::Utils.need_nil_read_check?(rules))
   end
 
   def add_prop_definition(prop, rules)
@@ -48,16 +49,16 @@ module T::Props::Optional::DecoratorMethods
     super
   end
 
-  def prop_validate_definition!(name, cls, rules, type)
+  def prop_validate_definition!(name, cls, rules_hash, type)
     result = super
 
-    if (rules_optional = rules[:optional])
+    if (rules_optional = rules_hash[:optional])
       if !VALID_OPTIONAL_RULES.include?(rules_optional)
         raise ArgumentError.new(":optional must be one of #{VALID_OPTIONAL_RULES.inspect}")
       end
     end
 
-    if rules.key?(:default) && rules.key?(:factory)
+    if rules_hash.key?(:default) && rules_hash.key?(:factory)
       raise ArgumentError.new("Setting both :default and :factory is invalid. See: go/chalk-docs")
     end
 
@@ -70,13 +71,13 @@ module T::Props::Optional::DecoratorMethods
 
   def get_default(rules, instance_class)
     if rules.include?(:default)
-      default = rules[:default]
+      default = rules.default
       T::Props::Utils.deep_clone_object(default)
     elsif rules.include?(:factory)
       # Factory should never be nil if the key is specified, but
-      # we do this rather than 'elsif rules[:factory]' for
+      # we do this rather than 'elsif rules.factory' for
       # consistency with :default.
-      factory = rules[:factory]
+      factory = rules.factory
       instance_class.class_exec(&factory)
     else
       nil
