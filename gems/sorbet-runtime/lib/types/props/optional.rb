@@ -40,8 +40,8 @@ module T::Props::Optional::DecoratorMethods
 
   def compute_derived_rules(rules)
     rules
-      .set_attr(:fully_optional, !T::Props::Utils.need_nil_write_check?(rules))
-      .set_attr(:need_nil_read_check, T::Props::Utils.need_nil_read_check?(rules))
+      .set!(:fully_optional, !T::Props::Utils.need_nil_write_check?(rules))
+      .set!(:need_nil_read_check, T::Props::Utils.need_nil_read_check?(rules))
   end
 
   def add_prop_definition(prop, rules)

@@ -290,7 +290,7 @@ class Opus::Types::Test::Props::DecoratorTest < Critic::Unit::UnitTest
     end
 
     it 'const creates an immutable prop' do
-      assert(ImmutablePropStruct.props[:const][:immutable])
+      assert(ImmutablePropStruct.props[:const].immutable)
     end
 
     it 'can be used with typed arrays' do

@@ -286,7 +286,7 @@ module T::Props::Serializable::DecoratorMethods
     @class.props.select {|_, v| T::Props::Utils.required_prop?(v)}.keys
   end
 
-  def prop_dont_store?(prop); prop_rules(prop)[:dont_store]; end
+  def prop_dont_store?(prop); prop_rules(prop).dont_store; end
   def prop_by_serialized_forms; @class.prop_by_serialized_forms; end
 
   def from_hash(hash, strict=false)
@@ -307,7 +307,7 @@ module T::Props::Serializable::DecoratorMethods
   end
 
   def add_prop_definition(prop, rules)
-    rules.set_attr!(:serialized_form, rules.include?(:name) ? rules.name : prop.to_s)
+    rules.set!(:serialized_form, rules.include?(:name) ? rules.name : prop.to_s)
     res = super
     prop_by_serialized_forms[rules.serialized_form] = prop
     res

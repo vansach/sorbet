@@ -17,6 +17,7 @@ class T::Props::Decorator
     attr_reader :clobber_existing_method
     attr_reader :default
     attr_reader :DEPRECATED_underspecified_type
+    attr_reader :dont_store
     attr_reader :enum
     attr_reader :extra
     attr_reader :factory
@@ -25,6 +26,7 @@ class T::Props::Decorator
     attr_reader :fully_optional
     attr_reader :ifunset
     attr_reader :immutable
+    attr_reader :inspect
     attr_reader :name
     attr_reader :need_nil_read_check
     attr_reader :optional
@@ -34,6 +36,7 @@ class T::Props::Decorator
     attr_reader :redaction
     attr_reader :sensitivity
     attr_reader :serializable_subtype
+    attr_reader :serialized_form
     attr_reader :type
     attr_reader :type_is_array_of_serializable
     attr_reader :type_is_custom_type
@@ -46,25 +49,48 @@ class T::Props::Decorator
 
     def initialize(rules_hash)
       rules_hash.each do |key, value|
-        set_attr!(key, value)
+        key = :clobber_existing_method if key == :clobber_existing_method!
+        set!(key, value)
       end
     end
 
-    def include?(key)
-      instance_variable_defined?("@#{key}")
+    def set(key, value)
+      dup.set!(key, value)
     end
 
-    def set_attr(key, value)
-      dup.set_attr!(key, value)
-    end
-
-    def set_attr!(key, value)
+    def set!(key, value)
       instance_variable_set("@#{key}".to_sym, value)
       self
     end
 
+    def delete(key)
+      key = :clobber_existing_method if key == :clobber_existing_method!
+      new_rules = dup
+      new_rules.remove_instance_variable("@#{key}".to_sym) if new_rules.include?(key)
+      new_rules
+    end
+
+    def include?(key)
+      key = :clobber_existing_method if key == :clobber_existing_method!
+      instance_variable_defined?("@#{key}")
+    end
+
+    # The remainder of these methods are included primarily to preserve relative
+    # backwards-compatibility with the old raw hash implementation.
+
+    def key?(key)
+      include?(key)
+    end
+
     def [](key)
+      key = :clobber_existing_method if key == :clobber_existing_method!
       instance_variable_get("@#{key}".to_sym)
+    end
+
+    def fetch(key)
+      value = self[key]
+      raise KeyError.new("key not found: \"#{key}\"") unless key?(key)
+      value
     end
   end
 
@@ -95,7 +121,7 @@ class T::Props::Decorator
   sig {params(prop: Symbol, key: Symbol, value: T.untyped).void}
   def mutate_prop_backdoor!(prop, key, value)
     @props = props.merge(
-      prop => props.fetch(prop).set_attr(key, value),
+      prop => props.fetch(prop).set(key, value),
     ).freeze
   end
 
@@ -105,17 +131,18 @@ class T::Props::Decorator
   sig {params(prop: T.any(Symbol, String)).returns(Rules).checked(:never)}
   def prop_rules(prop); props[prop.to_sym] || raise("No such prop: #{prop.inspect}"); end
 
-  sig {params(prop: Symbol, rules: Rules).void}
+  sig {params(prop: Symbol, rules: Rules).void.checked(:never)}
   def add_prop_definition(prop, rules)
     prop = prop.to_sym
+    override = rules.override
 
-    if props.include?(prop) && !rules.override
+    if props.include?(prop) && !override
       raise ArgumentError.new("Attempted to redefine prop #{prop.inspect} that's already defined without specifying :override => true: #{prop_rules(prop)}")
-    elsif !props.include?(prop) && rules.override
+    elsif !props.include?(prop) && override
       raise ArgumentError.new("Attempted to override a prop #{prop.inspect} that doesn't already exist")
     end
 
-    @props = @props.merge(prop => rules).freeze
+    @props = @props.merge(prop => rules.delete(:override)).freeze
     rules
   end
 
