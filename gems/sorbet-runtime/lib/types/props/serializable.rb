@@ -125,7 +125,7 @@ module T::Props::Serializable
       hkey = rules[:serialized_form]
       val = hash[hkey]
       if val.nil?
-        if T::Props::Utils.required_prop?(rules)
+        if !rules[:_tnilable]
           val = decorator.get_default(rules, self.class)
           if val.nil?
             msg = "Tried to deserialize a required prop from a nil value. It's "\
