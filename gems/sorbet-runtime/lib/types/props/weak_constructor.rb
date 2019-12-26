@@ -54,7 +54,7 @@ module T::Props::WeakConstructor::DecoratorMethods
         instance.instance_exec(hash[p], &default_struct.setter_proc)
         true
       else
-        default_struct.set_default(instance)
+        default_struct.apply(instance)
         false
       end
     end || 0

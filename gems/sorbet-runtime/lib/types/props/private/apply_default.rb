@@ -25,7 +25,7 @@ module T::Props
 
       # checked(:never) - O(object construction x prop count)
       sig {abstract.params(instance: T.all(T::Props::Optional, Object)).void.checked(:never)}
-      def set_default(instance); end
+      def apply(instance); end
 
       NO_CLONE_TYPES = T.let([TrueClass, FalseClass, NilClass, Symbol, Numeric, T::Enum].freeze, T::Array[Module])
 
@@ -81,7 +81,7 @@ module T::Props
 
       # checked(:never) - O(object construction x prop count)
       sig {override.params(instance: T.all(T::Props::Optional, Object)).void.checked(:never)}
-      def set_default(instance)
+      def apply(instance)
         instance.instance_variable_set(@accessor_key, default)
       end
     end
@@ -106,7 +106,7 @@ module T::Props
     class ApplyEmptyArrayDefault < ApplyDefault
       # checked(:never) - O(object construction x prop count)
       sig {override.params(instance: T.all(T::Props::Optional, Object)).void.checked(:never)}
-      def set_default(instance)
+      def apply(instance)
         instance.instance_variable_set(@accessor_key, [])
       end
 
@@ -123,7 +123,7 @@ module T::Props
     class ApplyEmptyHashDefault < ApplyDefault
       # checked(:never) - O(object construction x prop count)
       sig {override.params(instance: T.all(T::Props::Optional, Object)).void.checked(:never)}
-      def set_default(instance)
+      def apply(instance)
         instance.instance_variable_set(@accessor_key, {})
       end
 
@@ -154,7 +154,7 @@ module T::Props
 
       # checked(:never) - O(object construction x prop count)
       sig {override.params(instance: T.all(T::Props::Optional, Object)).void.checked(:never)}
-      def set_default(instance)
+      def apply(instance)
         # Use the actual setter to validate the factory returns a legitimate
         # value every time
         instance.instance_exec(default, &@setter_proc)

@@ -8,6 +8,9 @@ module T::Props::Serializable
   # Required because we have special handling for extra_props
   include T::Props::PrettyPrintable
 
+  NONSTRICT_SERIALIZATION = :__t_props_nonstrict_serialization
+  private_constant :NONSTRICT_SERIALIZATION
+
   # Serializes this object to a hash, suitable for conversion to
   # JSON/BSON.
   #
@@ -15,94 +18,20 @@ module T::Props::Serializable
   #   exception if this object has mandatory props with missing
   #   values.
   # @return [Hash] A serialization of this object.
-  def serialize(strict=true)
-    decorator = self.class.decorator
+  def serialize(strict=!Thread.current[NONSTRICT_SERIALIZATION])
     h = {}
 
-    decorator.props.each do |prop, rules|
-      hkey = rules[:serialized_form]
-
-      val = decorator.get(self, prop, rules)
-
-      if val.nil? && strict && !rules[:fully_optional]
-        # If the prop was already missing during deserialization, that means the application
-        # code already had to deal with a nil value, which means we wouldn't be accomplishing
-        # much by raising here (other than causing an unnecessary breakage).
-        if self.required_prop_missing_from_deserialize?(prop)
-          T::Configuration.log_info_handler(
-            "chalk-odm: missing required property in serialize",
-            prop: prop, class: self.class.name, id: decorator.get_id(self)
-          )
-        else
-          raise T::Props::InvalidValueError.new("#{self.class.name}.#{prop} not set for non-optional prop")
-        end
+    previously_nonstrict = Thread.current[NONSTRICT_SERIALIZATION]
+    begin
+      Thread.current[NONSTRICT_SERIALIZATION] = !strict
+      self.class.decorator.prop_serializers&.each do |ser|
+        ser.call(self, h)
       end
-
-      # Don't serialize values that are nil to save space (both the
-      # nil value itself and the field name in the serialized BSON
-      # document)
-      next if rules[:dont_store] || val.nil?
-
-      if rules[:serializable_subtype]
-        if rules[:type_is_serializable]
-          val = val.serialize(strict)
-        elsif rules[:type_is_array_of_serializable]
-          if (subtype = rules[:serializable_subtype]).is_a?(T::Props::CustomType)
-            val = val.map {|el| el && subtype.serialize(el)}
-          else
-            val = val.map {|el| el && el.serialize(strict)}
-          end
-        elsif rules[:type_is_hash_of_serializable_values] && rules[:type_is_hash_of_custom_type_keys]
-          key_subtype = rules[:serializable_subtype][:keys]
-          value_subtype = rules[:serializable_subtype][:values]
-          if value_subtype.is_a?(T::Props::CustomType)
-            val = val.each_with_object({}) do |(key, value), result|
-              result[key_subtype.serialize(key)] = value && value_subtype.serialize(value)
-            end
-          else
-            val = val.each_with_object({}) do |(key, value), result|
-              result[key_subtype.serialize(key)] = value && value.serialize(strict)
-            end
-          end
-        elsif rules[:type_is_hash_of_serializable_values]
-          value_subtype = rules[:serializable_subtype]
-          if value_subtype.is_a?(T::Props::CustomType)
-            val = val.transform_values {|v| v && value_subtype.serialize(v)}
-          else
-            val = val.transform_values {|v| v && v.serialize(strict)}
-          end
-        elsif rules[:type_is_hash_of_custom_type_keys]
-          key_subtype = rules[:serializable_subtype]
-          val = val.each_with_object({}) do |(key, value), result|
-            result[key_subtype.serialize(key)] = value
-          end
-        end
-      elsif rules[:type_is_custom_type]
-        val = rules[:type].serialize(val)
-
-        unless T::Props::CustomType.valid_serialization?(val, rules[:type])
-          msg = "#{rules[:type]} did not serialize to a valid scalar type. It became a: #{val.class}"
-          if val.is_a?(Hash)
-            msg += "\nIf you want to store a structured Hash, consider using a T::Struct as your type."
-          end
-          raise T::Props::InvalidValueError.new(msg)
-        end
-      end
-
-      needs_clone = rules[:type_needs_clone]
-      if needs_clone
-        if needs_clone == :shallow
-          val = val.dup
-        else
-          val = T::Props::Utils.deep_clone_object(val)
-        end
-      end
-
-      h[hkey] = val
+    ensure
+      Thread.current[NONSTRICT_SERIALIZATION] = previously_nonstrict
     end
 
     h.merge!(@_extra_props) if @_extra_props
-
     h
   end
 
@@ -117,97 +46,11 @@ module T::Props::Serializable
   #  props on this instance.
   # @return [void]
   def deserialize(hash, strict=false)
-    decorator = self.class.decorator
-
-    matching_props = 0
-
-    decorator.props.each do |p, rules|
-      hkey = rules[:serialized_form]
-      val = hash[hkey]
-      if val.nil?
-        if T::Props::Utils.required_prop?(rules)
-          val = decorator.get_default(rules, self.class)
-          if val.nil?
-            msg = "Tried to deserialize a required prop from a nil value. It's "\
-              "possible that a nil value exists in the database, so you should "\
-              "provide a `default: or factory:` for this prop (see go/optional "\
-              "for more details). If this is already the case, you probably "\
-              "omitted a required prop from the `fields:` option when doing a "\
-              "partial load."
-            storytime = {prop: hkey, klass: self.class.name}
-
-            # Notify the model owner if it exists, and always notify the API owner.
-            begin
-              if defined?(Opus) && defined?(Opus::Ownership) && decorator.decorated_class < Opus::Ownership
-                T::Configuration.hard_assert_handler(
-                  msg,
-                  storytime: storytime,
-                  project: decorator.decorated_class.get_owner
-                )
-              end
-            ensure
-              T::Configuration.hard_assert_handler(msg, storytime: storytime)
-            end
-          end
-        elsif rules[:need_nil_read_check]
-          self.required_prop_missing_from_deserialize(p)
-        end
-
-        matching_props += 1 if hash.key?(hkey)
-      else
-        if (subtype = rules[:serializable_subtype])
-          val =
-            if rules[:type_is_array_of_serializable]
-              if subtype.is_a?(T::Props::CustomType)
-                val.map {|el| el && subtype.deserialize(el)}
-              else
-                val.map {|el| el && subtype.from_hash(el)}
-              end
-            elsif rules[:type_is_hash_of_serializable_values] && rules[:type_is_hash_of_custom_type_keys]
-              key_subtype = subtype[:keys]
-              values_subtype = subtype[:values]
-              if values_subtype.is_a?(T::Props::CustomType)
-                val.each_with_object({}) do |(key, value), result|
-                  result[key_subtype.deserialize(key)] = value && values_subtype.deserialize(value)
-                end
-              else
-                val.each_with_object({}) do |(key, value), result|
-                  result[key_subtype.deserialize(key)] = value && values_subtype.from_hash(value)
-                end
-              end
-            elsif rules[:type_is_hash_of_serializable_values]
-              if subtype.is_a?(T::Props::CustomType)
-                val.transform_values {|v| v && subtype.deserialize(v)}
-              else
-                val.transform_values {|v| v && subtype.from_hash(v)}
-              end
-            elsif rules[:type_is_hash_of_custom_type_keys]
-              val.map do |key, value|
-                [subtype.deserialize(key), value]
-              end.to_h
-            else
-              subtype.from_hash(val)
-            end
-        elsif (needs_clone = rules[:type_needs_clone])
-          val =
-            if needs_clone == :shallow
-              val.dup
-            else
-              T::Props::Utils.deep_clone_object(val)
-            end
-        elsif rules[:type_is_custom_type]
-          val = rules[:type].deserialize(val)
-        end
-
-        matching_props += 1
-      end
-
-      self.instance_variable_set(rules[:accessor_key], val) # rubocop:disable PrisonGuard/NoLurkyInstanceVariableAccess
-    end
+    found_count = __inner_deserialize(hash)
 
     # We compute extra_props this way specifically for performance
-    if matching_props < hash.size
-      pbsf = decorator.prop_by_serialized_forms
+    if found_count < hash.size
+      pbsf = self.class.decorator.prop_by_serialized_forms
       h = hash.reject {|k, _| pbsf.key?(k)}
 
       if strict
@@ -218,7 +61,14 @@ module T::Props::Serializable
     end
   end
 
+  # This will be overridden if there are any props
+  private def __inner_deserialize(hash)
+    0
+  end
+
   # with() will clone the old object to the new object and merge the specified props to the new object.
+  #
+  # FIXME: This won't copy :dont_store props
   def with(changed_props)
     with_existing_hash(changed_props, existing_hash: self.serialize)
   end
@@ -254,14 +104,25 @@ module T::Props::Serializable
     new_val
   end
 
-  # @return [T::Boolean] Was this property missing during deserialize?
-  def required_prop_missing_from_deserialize?(prop)
-    return false if @_required_props_missing_from_deserialize.nil?
-    @_required_props_missing_from_deserialize.include?(prop)
+  # Asserts if this property is missing during strict serialize
+  private def required_prop_missing_from_serialize(prop)
+    if Thread.current[NONSTRICT_SERIALIZATION]
+      # noop
+    elsif @_required_props_missing_from_deserialize&.include?(prop)
+      # If the prop was already missing during deserialization, that means the application
+      # code already had to deal with a nil value, which means we wouldn't be accomplishing
+      # much by raising here (other than causing an unnecessary breakage).
+      T::Configuration.log_info_handler(
+        "chalk-odm: missing required property in serialize",
+        prop: prop, class: self.class.name, id: self.class.decorator.get_id(self)
+      )
+    else
+      raise T::Props::InvalidValueError.new("#{self.class.name}.#{prop} not set for non-optional prop")
+    end
   end
 
-  # @return Marks this property as missing during deserialize
-  def required_prop_missing_from_deserialize(prop)
+  # Marks this property as missing during deserialize
+  private def required_prop_missing_from_deserialize(prop)
     @_required_props_missing_from_deserialize ||= Set[]
     @_required_props_missing_from_deserialize << prop
     nil
@@ -306,11 +167,195 @@ module T::Props::Serializable::DecoratorMethods
     prop_by_serialized_forms[serialized_form.to_s] || raise("No such serialized form: #{serialized_form.inspect}")
   end
 
+  attr_reader :prop_serializers, :prop_deserializers
+
   def add_prop_definition(prop, rules)
     rules[:serialized_form] = rules.fetch(:name, prop.to_s)
     res = super
     prop_by_serialized_forms[rules[:serialized_form]] = prop
+
+    unless rules[:dont_store]
+      make_prop_serializer(prop, rules)
+      make_prop_deserializer(prop, rules)
+    end
+
     res
+  end
+
+  private def make_prop_serializer(prop, rules)
+    @prop_serializers ||= []
+    @prop_serializers << make_serialize_proc(prop, rules)
+  end
+
+  private def make_prop_deserializer(prop, rules)
+    @prop_deserializers ||= []
+
+    prop_index = @prop_deserializers.length
+    prop_deserialize_proc = make_deserialize_proc(prop, rules, prop_index)
+    @prop_deserializers << prop_deserialize_proc
+
+    if prop_index < T::Props::Private::DeserializeFastPaths::MAX_PROPS
+      decorated_class.define_method("__prop_deserializer_#{prop_index}", &prop_deserialize_proc)
+      hash_deserialize_proc = T::Props::Private::DeserializeFastPaths::INNER_DESERIALIZE_BY_PROP_COUNT.fetch(prop_index)
+      decorated_class.define_method(:__inner_deserialize, &hash_deserialize_proc)
+      decorated_class.send(:private, :__inner_deserialize)
+    elsif prop_index == T::Props::Private::DeserializeFastPaths::MAX_PROPS
+      # We only need to do anything when we first cross the threshold
+      T::Props::Private::DeserializeFastPaths::MAX_PROPS.times do |i|
+        decorated_class.remove_method("__prop_deserializer_#{i}")
+      end
+      deserializers = @prop_deserializers
+      decorated_class.define_method(:__inner_deserialize) do |hash|
+        deserializers.count {|d| instance_exec(hash, &d)}
+      end
+      decorated_class.send(:private, :__inner_deserialize)
+    end
+  end
+
+  private def make_serialize_proc(prop, rules)
+    hkey = rules.fetch(:serialized_form)
+    accessor_key = rules.fetch(:accessor_key)
+    type_object = T::Utils::Nilable.get_underlying_type_object(rules.fetch(:type_object))
+    transformer = T::Props::Private::SerdeFactory.generate(
+      type_object,
+      T::Props::Private::SerdeFactory::Mode::SERIALIZE,
+      false,
+    )
+    need_nil_write_check = T::Props::Utils.need_nil_write_check?(rules)
+
+    lambda do |instance, hash|
+      val = instance.instance_variable_get(accessor_key)
+      if val.nil?
+        instance.send(:required_prop_missing_from_serialize, prop) if need_nil_write_check
+      else
+        val = transformer.call(val) if transformer
+        hash[hkey] = val
+      end
+    end
+  end
+
+  private def make_deserialize_proc(prop, rules, prop_index)
+    hkey = rules.fetch(:serialized_form)
+    accessor_key = rules.fetch(:accessor_key)
+
+    transformer = T::Props::Private::SerdeFactory.generate(
+      T::Utils::Nilable.get_underlying_type_object(rules.fetch(:type_object)),
+      T::Props::Private::SerdeFactory::Mode::DESERIALIZE,
+      false,
+    )
+
+    nil_handler = if T::Props::Utils.required_prop?(rules)
+      # We only set defaults for required props on deserialize
+      props_with_defaults&.fetch(prop, nil) || RaiseOnNilDeserialize.new(hkey)
+    elsif T::Props::Utils.need_nil_write_check?(rules)
+      StoreOnNilDeserialize.new(prop)
+    end
+
+    if prop_index < T::Props::Private::DeserializeFastPaths::MAX_PROPS
+      attr_writer_name = "__prop_attr_writer_#{prop_index}".to_sym
+      create_private_attr_writer(prop, attr_writer_name)
+      if transformer
+        T::Props::Private::DeserializeFastPaths.deserialize_proc_with_transform(
+          serialized_form: hkey,
+          transformer: transformer,
+          nil_handler: nil_handler,
+          attr_writer_name: attr_writer_name,
+        )
+      else
+        T::Props::Private::DeserializeFastPaths.deserialize_proc_without_transform(
+          serialized_form: hkey,
+          nil_handler: nil_handler,
+          attr_writer_name: attr_writer_name,
+        )
+      end
+    else
+      if transformer
+        lambda do |hash|
+          val = hash[hkey]
+          if val.nil?
+            nil_handler&.apply(self)
+            hash.key?(hkey)
+          else
+            instance_variable_set(accessor_key, transformer.call(val))
+            true
+          end
+        end
+      else
+        lambda do |hash|
+          val = hash[hkey]
+          if val.nil?
+            nil_handler&.apply(self)
+            hash.key?(hkey)
+          else
+            instance_variable_set(accessor_key, val)
+            true
+          end
+        end
+      end
+    end
+  end
+
+  # A dedicated `attr_writer` method is ~2x as fast as `instance_variable_set`
+  # on Ruby 2.6 - and this holds even if it's been copied using `alias_method`
+  private def create_private_attr_writer(prop, method_name)
+    setter_name = "#{prop}=".to_sym
+
+    had_setter = decorated_class.method_defined?(setter_name)
+    if had_setter
+      decorated_class.alias_method(:__orig_setter, setter_name)
+    end
+
+    decorated_class.attr_writer(prop)
+    decorated_class.alias_method(method_name, setter_name)
+    decorated_class.send(:private, method_name)
+
+    if had_setter
+      decorated_class.alias_method(setter_name, :__orig_setter)
+      decorated_class.remove_method(:__orig_setter)
+    else
+      decorated_class.remove_method(setter_name)
+    end
+  end
+
+  class RaiseOnNilDeserialize
+    def initialize(hkey)
+      @hkey = hkey
+    end
+
+    # Same interface as ApplyDefault
+    def apply(instance)
+      msg = "Tried to deserialize a required prop from a nil value. It's "\
+        "possible that a nil value exists in the database, so you should "\
+        "provide a `default: or factory:` for this prop (see go/optional "\
+        "for more details). If this is already the case, you probably "\
+        "omitted a required prop from the `fields:` option when doing a "\
+        "partial load."
+      storytime = {prop: @hkey, klass: instance.class.name}
+
+      # Notify the model owner if it exists, and always notify the API owner.
+      begin
+        if defined?(Opus) && defined?(Opus::Ownership) && instance.class < Opus::Ownership
+          T::Configuration.hard_assert_handler(
+            msg,
+            storytime: storytime,
+            project: instance.class.get_owner
+          )
+        end
+      ensure
+        T::Configuration.hard_assert_handler(msg, storytime: storytime)
+      end
+    end
+  end
+
+  class StoreOnNilDeserialize
+    def initialize(prop)
+      @prop = prop
+    end
+
+    # Same interface as ApplyDefault
+    def apply(instance)
+      instance.send(:required_prop_missing_from_deserialize, @prop)
+    end
   end
 
   def prop_validate_definition!(name, cls, rules, type)

@@ -25,7 +25,7 @@ module T::Private::Abstract::Data
 
   # Works like `setdefault` in Python. If key has already been set, return its value. If not,
   # insert `key` with a value of `default` and return `default`.
-  def self.set_default(mod, key, default)
+  def self.apply(mod, key, default)
     if self.key?(mod, key)
       self.get(mod, key)
     else

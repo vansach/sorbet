@@ -515,4 +515,18 @@ class Opus::Types::Test::Props::SerializableTest < Critic::Unit::UnitTest
       assert_equal('foo', CustomSerializedForm.from_hash(hash).prop)
     end
   end
+
+  class ArrayOfNilableStruct < T::Struct
+    prop :prop, T::Array[T.nilable(MyEnum)]
+  end
+
+  describe 'with array of nilable enums' do
+    it 'can deserialize non-nil' do
+      assert_equal([MyEnum::FOO], ArrayOfNilableStruct.from_hash('prop' => ['foo']).prop)
+    end
+
+    it 'can deserialize nil' do
+      assert_equal([nil], ArrayOfNilableStruct.from_hash('prop' => [nil]).prop)
+    end
+  end
 end

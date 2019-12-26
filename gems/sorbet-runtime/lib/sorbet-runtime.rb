@@ -96,6 +96,8 @@ require_relative 'types/enum'
 # Props that run sigs statically so have to be after all the others :(
 require_relative 'types/props/private/setter_factory'
 require_relative 'types/props/private/apply_default'
+require_relative 'types/props/private/serde_factory'
+require_relative 'types/props/private/deserialize_fast_paths'
 require_relative 'types/props/optional'
 require_relative 'types/props/weak_constructor'
 require_relative 'types/props/constructor'
