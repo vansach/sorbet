@@ -18,4 +18,4 @@ def bar(x)
 end
 
 bar(A)
-bar(B)  # error: Expected `T.extends(MyMod)` but found `B`
+bar(B)  # error: Expected `T.extends(MyMod)` but found `T.class_of(B)`
