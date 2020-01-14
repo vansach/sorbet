@@ -640,6 +640,32 @@ public:
 };
 CheckSize(MetaType, 24, 8);
 
+// The type `T.extends(M)` is the rough equivalent of `T.class_of(C)` but for modules which are extended instead of
+// included. That is to say, a value `x` should be acceptable as a value of type `T.extends(M)` if `x` is a class or
+// module and that class or module includes `extends M` somewhere in its body.
+class ExtendsType final : public Type {
+public:
+    SymbolRef mod;
+    ExtendsType(const SymbolRef mod);
+
+    virtual std::string toStringWithTabs(const GlobalState &gs, int tabs = 0) const final;
+    virtual std::string show(const GlobalState &gs) const final;
+    virtual std::string typeName() const final;
+
+    virtual DispatchResult dispatchCall(Context ctx, DispatchArgs final) override final;
+    virtual TypePtr getCallArguments(Context ctx, NameRef name) final;
+    virtual bool derivesFrom(const GlobalState &gs, SymbolRef klass) const final;
+    void _sanityCheck(Context ctx) final;
+    virtual bool isFullyDefined() final;
+
+    virtual TypePtr _instantiate(Context ctx, const InlinedVector<SymbolRef, 4> &params,
+                                 const std::vector<TypePtr> &targs) override;
+    virtual int kind() final;
+    virtual TypePtr _approximate(Context ctx, const TypeConstraint &tc) override;
+    SymbolRef symbol() const;
+};
+CheckSize(ExtendsType, 24, 8);
+
 class SendAndBlockLink {
     SendAndBlockLink(const SendAndBlockLink &) = default;
 

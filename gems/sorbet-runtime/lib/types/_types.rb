@@ -76,6 +76,11 @@ module T
     T::Types::ClassOf.new(klass)
   end
 
+  # Matches any class that extends the provided module
+  def self.extends(mod)
+    T::Types::Extends.new(mod)
+  end
+
 
   ## END OF THE METHODS TO PASS TO `sig`.
 

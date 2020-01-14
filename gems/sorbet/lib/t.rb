@@ -25,6 +25,7 @@ module T
   def self.proc; end
   def self.self_type; end
   def self.class_of(klass); end
+  def self.extends(mod); end
   def self.type_alias(type=nil, &blk); end
   def self.type_parameter(name); end
 

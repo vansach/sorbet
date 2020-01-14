@@ -42,6 +42,7 @@ module T
   def self.proc; end
 
   def self.class_of(klass); end
+  def self.extends(klass); end
   def self.noreturn; end
   def self.enum(values); end
   def self.untyped; end
