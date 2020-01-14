@@ -9,7 +9,7 @@ class WorkerPool {
 public:
     inline static constexpr std::chrono::milliseconds BLOCK_INTERVAL() {
         using namespace std::chrono_literals;
-        return 250ms;
+        return 20ms;
     }
     using Task = std::function<void()>;
     static std::unique_ptr<WorkerPool> create(int size, spd::logger &logger);
