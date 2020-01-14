@@ -551,6 +551,50 @@ core::TypePtr interpretTCombinator(core::MutableContext ctx, ast::Send *send, co
             }
             return singleton.data(ctx)->externalType(ctx);
         }
+        case core::Names::extends()._id: {
+            if (send->args.size() != 1) {
+                // Error will be reported in infer
+                return core::Types::untypedUntracked();
+            }
+
+            auto arg = send->args[0].get();
+
+            auto *obj = ast::cast_tree<ast::ConstantLit>(arg);
+            if (!obj) {
+                if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidTypeDeclaration)) {
+                    e.setHeader("T.extends needs a Module as its argument");
+                }
+                return core::Types::untypedUntracked();
+            }
+            auto maybeAliased = obj->symbol;
+            if (maybeAliased.data(ctx)->isTypeAlias()) {
+                if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidTypeDeclaration)) {
+                    e.setHeader("T.extends can't be used with a T.type_alias");
+                }
+                return core::Types::untypedUntracked();
+            }
+            if (maybeAliased.data(ctx)->isTypeMember()) {
+                if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidTypeDeclaration)) {
+                    e.setHeader("T.extends can't be used with a T.type_member");
+                }
+                return core::Types::untypedUntracked();
+            }
+            auto sym = maybeAliased.data(ctx)->dealias(ctx);
+            if (sym.data(ctx)->isStaticField()) {
+                if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidTypeDeclaration)) {
+                    e.setHeader("T.extends can't be used with a constant field");
+                }
+                return core::Types::untypedUntracked();
+            }
+
+            if (!sym.data(ctx)->isClassOrModuleModule()) {
+                if (auto e = ctx.state.beginError(send->loc, core::errors::Resolver::InvalidTypeDeclaration)) {
+                    e.setHeader("T.extends can only be used with modules");
+                }
+                return core::Types::untypedUntracked();
+            }
+            return core::make_type<core::ExtendsType>(sym);
+        }
         case core::Names::untyped()._id:
             return core::Types::untyped(ctx, args.untypedBlame);
         case core::Names::selfType()._id:

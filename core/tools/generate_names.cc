@@ -117,6 +117,7 @@ NameDef names[] = {
     {"singletonClass", "singleton_class"},
     {"class_", "class"},
     {"classOf", "class_of"},
+    {"extends"},
     {"selfType", "self_type"},
     {"experimentalAttachedClass", "experimental_attached_class"},
     {"attachedClass", "attached_class"},
