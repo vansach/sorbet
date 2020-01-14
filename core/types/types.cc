@@ -472,6 +472,8 @@ void ClassType::_sanityCheck(Context ctx) {
     ENFORCE(this->symbol.exists());
 }
 
+void ExtendsType::_sanityCheck(Context ctx) {}
+
 int AppliedType::kind() {
     return 1;
 }
@@ -524,6 +526,10 @@ int SelfType::kind() {
     return 12;
 }
 
+int ExtendsType::kind() {
+    return 13;
+}
+
 bool ClassType::isFullyDefined() {
     return true;
 }
@@ -550,6 +556,10 @@ bool AndType::isFullyDefined() {
 
 bool OrType::isFullyDefined() {
     return this->left->isFullyDefined() && this->right->isFullyDefined();
+}
+
+bool ExtendsType::isFullyDefined() {
+    return true;
 }
 
 /** Returns type parameters of what reordered in the order of type parameters of asIf
@@ -841,6 +851,26 @@ DispatchResult SelfType::dispatchCall(Context ctx, DispatchArgs args) {
     Exception::raise("should never happen");
 }
 
+ExtendsType::ExtendsType(const SymbolRef mod) : mod(mod) {
+    categoryCounterInc("types.allocated", "extendstype");
+}
+
+SymbolRef ExtendsType::symbol() const {
+    return this->mod;
+}
+
+TypePtr ExtendsType::getCallArguments(Context ctx, NameRef name) {
+    Exception::raise("UNIMPLEMENTED (getCallArguments)");
+}
+
+bool ExtendsType::derivesFrom(const GlobalState &gs, SymbolRef klass) const {
+    Exception::raise("UNIMPLEMENTED (derivesFrom)");
+}
+
+DispatchResult ExtendsType::dispatchCall(Context ctx, DispatchArgs args) {
+    return this->mod.data(ctx)->lookupSingletonClass(ctx).data(ctx)->externalType(ctx)->dispatchCall(ctx, args);
+}
+
 void SelfType::_sanityCheck(Context ctx) {}
 
 TypePtr Types::widen(Context ctx, const TypePtr &type) {
@@ -917,6 +947,7 @@ TypePtr Types::unwrapSelfTypeParam(Context ctx, const TypePtr &type) {
                 ret = type;
             }
         },
+        [&](ExtendsType *extends) { ret = type; },
         [&](Type *tp) {
             ENFORCE(false, "Unhandled case: {}", type->toString(ctx));
             Exception::notImplemented();

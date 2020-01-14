@@ -1059,6 +1059,10 @@ bool isSubTypeUnderConstraintSingle(Context ctx, TypeConstraint &constr, Untyped
             if (auto *c2 = cast_type<ClassType>(t2.get())) {
                 return classSymbolIsAsGoodAs(ctx, a1->klass, c2->symbol);
             }
+            if (auto *e2 = cast_type<ExtendsType>(t2.get())) {
+                auto mixins = a1->klass.data(ctx)->mixins();
+                return absl::c_find(mixins, e2->symbol()) != mixins.end();
+            }
             return false;
         } else {
             result = classSymbolIsAsGoodAs(ctx, a1->klass, a2->klass);
@@ -1184,6 +1188,8 @@ bool isSubTypeUnderConstraintSingle(Context ctx, TypeConstraint &constr, Untyped
         }
     } else if (isa_type<ProxyType>(t2.get())) {
         // non-proxies are never subtypes of proxies.
+        return false;
+    } else if (auto *e2 = cast_type<ExtendsType>(t2.get())) {
         return false;
     } else {
         if (auto *c1 = cast_type<ClassType>(t1.get())) {

@@ -485,6 +485,15 @@ TypePtr AndType::_replaceSelfType(Context ctx, const TypePtr &receiver) {
     return nullptr;
 }
 
+TypePtr ExtendsType::_instantiate(Context ctx, const InlinedVector<SymbolRef, 4> &params,
+                                  const vector<TypePtr> &targs) {
+    return nullptr;
+}
+
+TypePtr ExtendsType::_approximate(Context ctx, const TypeConstraint &tc) {
+    return nullptr;
+}
+
 unsigned int Type::hash(const GlobalState &gs) const {
     return _hash(this->toString(gs)); // TODO: make something better
 }

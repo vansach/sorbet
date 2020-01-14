@@ -434,6 +434,14 @@ string SelfType::showValue(const GlobalState &gs) const {
     return show(gs);
 }
 
+string ExtendsType::toStringWithTabs(const GlobalState &gs, int tabs) const {
+    return show(gs);
+}
+
+string ExtendsType::show(const GlobalState &gs) const {
+    return fmt::format("T.extends({})", this->mod.show(gs));
+}
+
 string TypeVar::typeName() const {
     return "TypeVar";
 }
@@ -484,5 +492,9 @@ string LambdaParam::typeName() const {
 
 string SelfTypeParam::typeName() const {
     return "SelfTypeParam";
+}
+
+string ExtendsType::typeName() const {
+    return "ExtendsType";
 }
 } // namespace sorbet::core

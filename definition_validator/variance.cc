@@ -79,6 +79,8 @@ private:
 
             [&](core::TypeVar *tvar) {},
 
+            [&](core::ExtendsType *extn) {},
+
             [&](core::OrType *any) {
                 validate(ctx, polarity, any->left);
                 validate(ctx, polarity, any->right);
