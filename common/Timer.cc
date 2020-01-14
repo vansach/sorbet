@@ -44,7 +44,7 @@ Timer::~Timer() {
     if (!canceled && dur > std::chrono::milliseconds(1)) {
         // the trick ^^^ is to skip double comparison in the common case and use the most efficient representation.
         auto dur = std::chrono::duration<double, std::milli>(clock - start);
-        log.debug("{}: {}ms", this->name.str, dur.count());
+        log.debug("{}: {}ms {}", this->name.str, dur.count(), args.empty() ? "" : args.at(0).second);
         sorbet::timingAdd(this->name, start, clock, move(args), self, prev);
     }
 }
