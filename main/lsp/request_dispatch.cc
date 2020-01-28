@@ -330,6 +330,8 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
     // TODO(jvilk): Make Timer accept multiple FlowIds so we can show merged messages correctly.
     Timer timeit(logger, "process_request");
     const LSPMethod method = msg.method();
+    // The preprocessor handles these for us.
+    ENFORCE(method != LSPMethod::SorbetError);
     if (msg.isNotification()) {
         Timer timeit(logger, "notification", {{"method", convertLSPMethodToString(method)}});
         // The preprocessor should canonicalize these messages into SorbetWorkspaceEdits, so they should never appear
@@ -357,14 +359,6 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
             typecheckerCoord.initialize(move(updates));
         } else if (method == LSPMethod::Exit) {
             prodCategoryCounterInc("lsp.messages.processed", "exit");
-        } else if (method == LSPMethod::SorbetError) {
-            auto &errorInfo = get<unique_ptr<SorbetErrorParams>>(params);
-            if (errorInfo->code == (int)LSPErrorCodes::MethodNotFound) {
-                // Not an error; we just don't care about this notification type (e.g. TextDocumentDidSave).
-                logger->debug(errorInfo->message);
-            } else {
-                logger->error(errorInfo->message);
-            }
         } else if (method == LSPMethod::SorbetFence) {
             // Ensure all prior messages have finished processing before sending response.
             typecheckerCoord.syncRun(make_unique<SorbetFenceTask>(*config, get<int>(msg.asNotification().params)));
@@ -445,11 +439,6 @@ void LSPLoop::processRequestInternal(LSPMessage &msg) {
             prodCategoryCounterInc("lsp.messages.processed", "shutdown");
             auto response = make_unique<ResponseMessage>("2.0", id, method);
             response->result = JSONNullObject();
-            config->output->write(move(response));
-        } else if (method == LSPMethod::SorbetError) {
-            auto &params = get<unique_ptr<SorbetErrorParams>>(rawParams);
-            auto response = make_unique<ResponseMessage>("2.0", id, method);
-            response->error = make_unique<ResponseError>(params->code, params->message);
             config->output->write(move(response));
         } else {
             auto response = make_unique<ResponseMessage>("2.0", id, method);

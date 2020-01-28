@@ -227,6 +227,24 @@ void LSPPreprocessor::preprocessAndEnqueue(QueueState &state, unique_ptr<LSPMess
             shouldEnqueue = shouldMerge = true;
             break;
         }
+        case LSPMethod::SorbetError: {
+            // Don't bother the main thread with these. Quickly handle.
+            if (msg->isRequest()) {
+                auto &params = get<unique_ptr<SorbetErrorParams>>(msg->asRequest().params);
+                auto response = make_unique<ResponseMessage>("2.0", msg->id(), method);
+                response->error = make_unique<ResponseError>(params->code, params->message);
+                config->output->write(move(response));
+            } else if (msg->isNotification()) {
+                auto &errorInfo = get<unique_ptr<SorbetErrorParams>>(msg->asNotification().params);
+                if (errorInfo->code == (int)LSPErrorCodes::MethodNotFound) {
+                    // Not an error; we just don't care about this notification type (e.g. TextDocumentDidSave).
+                    logger->debug(errorInfo->message);
+                } else {
+                    logger->error(errorInfo->message);
+                }
+            }
+            return;
+        }
         default: {
             // No need to merge; this isn't a file edit.
             shouldEnqueue = true;
