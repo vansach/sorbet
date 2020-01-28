@@ -113,20 +113,23 @@ LSPMessage::LSPMessage(rapidjson::Document &d) : LSPMessage::LSPMessage(fromJSON
 
 LSPMessage::LSPMessage(const std::string &json) : LSPMessage::LSPMessage(fromJSON(json)) {}
 
-bool LSPMessage::isCanceled() const {
-    return canceled;
+unique_ptr<ResponseMessage> LSPMessage::cancelRequest() {
+    ENFORCE(isRequest());
+    auto &request = asRequest();
+    cancelTimers();
+    auto response = make_unique<ResponseMessage>("2.0", id().value(), request.method);
+    prodCounterInc("lsp.messages.canceled");
+    response->error = make_unique<ResponseError>((int)LSPErrorCodes::RequestCancelled, "Request was canceled");
+    return response;
 }
 
-void LSPMessage::cancel() {
-    if (!canceled) {
-        canceled = true;
-        // Timers are optional, and may not be specified (e.g., they will be nullptr). Guard against that possibility.
-        if (timer) {
-            timer->cancel();
-        }
-        if (methodTimer) {
-            methodTimer->cancel();
-        }
+void LSPMessage::cancelTimers() {
+    // Timers are optional, and may not be specified (e.g., they will be nullptr). Guard against that possibility.
+    if (timer) {
+        timer->cancel();
+    }
+    if (methodTimer) {
+        methodTimer->cancel();
     }
 }
 
@@ -140,7 +143,7 @@ optional<MessageId> LSPMessage::id() const {
 }
 
 bool LSPMessage::isDelayable() const {
-    if (isResponse() || canceled) {
+    if (isResponse()) {
         // Client responses to our inquiries or canceled requests should never block file update merges.
         return true;
     }

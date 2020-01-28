@@ -9,19 +9,24 @@ using namespace std;
 namespace sorbet::realmain::lsp {
 
 namespace {
-void cancelRequest(std::deque<std::unique_ptr<LSPMessage>> &pendingRequests, const CancelParams &cancelParams) {
-    for (auto &current : pendingRequests) {
-        if (current->isRequest()) {
-            auto &request = current->asRequest();
+void cancelRequest(LSPOutput &output, deque<std::unique_ptr<LSPMessage>> &pendingRequests,
+                   const CancelParams &cancelParams) {
+    for (auto it = pendingRequests.begin(); it != pendingRequests.end(); ++it) {
+        auto &current = **it;
+        if (current.isRequest()) {
+            auto &request = current.asRequest();
             if (request.id == cancelParams.id) {
-                // We didn't start processing it yet -- great! Cancel it and return.
-                current->cancel();
+                // We didn't start processing it yet -- great! Cancel it, send a cancelation response immediately,
+                // and remove the message from the queue.
+                output.write(current.cancelRequest());
+                pendingRequests.erase(it);
                 return;
             }
         }
     }
-    // Else... it's too late; we have either already processed it, or are currently processing it. Swallow cancellation
-    // and ignore.
+    // It's too late; we have either already processed it, or are currently processing it. Swallow cancellation and
+    // ignore.
+    return;
 }
 
 string readFile(string_view path, const FileSystem &fs) {
@@ -29,8 +34,9 @@ string readFile(string_view path, const FileSystem &fs) {
         return fs.readFile(path);
     } catch (FileNotFoundException e) {
         // Act as if file is completely empty.
-        // NOTE: It is not appropriate to throw an error here. Sorbet does not differentiate between Watchman updates
-        // that specify if a file has changed or has been deleted, so this is the 'golden path' for deleted files.
+        // NOTE: It is not appropriate to throw an error here. Sorbet does not differentiate between Watchman
+        // updates that specify if a file has changed or has been deleted, so this is the 'golden path' for deleted
+        // files.
         // TODO(jvilk): Use Tombstone files instead.
         return "";
     }
@@ -83,7 +89,7 @@ void LSPPreprocessor::mergeFileChanges(absl::Mutex &mtx, QueueState &state) {
             auto &mergeableParams = get<unique_ptr<SorbetWorkspaceEditParams>>(mergeMsg.asNotification().params);
             msgParams->merge(*mergeableParams);
             msg.startTracers.insert(msg.startTracers.end(), mergeMsg.startTracers.begin(), mergeMsg.startTracers.end());
-            mergeMsg.cancel();
+            mergeMsg.cancelTimers();
             // Delete the update we just merged and move on to next item.
             it = pendingRequests.erase(it);
             requestsMergedCounter++;
@@ -137,7 +143,8 @@ void LSPPreprocessor::preprocessAndEnqueue(QueueState &state, unique_ptr<LSPMess
     switch (method) {
         case LSPMethod::$CancelRequest: {
             absl::MutexLock lock(&stateMtx);
-            cancelRequest(state.pendingRequests, *get<unique_ptr<CancelParams>>(msg->asNotification().params));
+            cancelRequest(*config->output, state.pendingRequests,
+                          *get<unique_ptr<CancelParams>>(msg->asNotification().params));
             // A canceled request can be moved around, so we may be able to merge more file changes.
             mergeFileChanges(stateMtx, state);
             break;

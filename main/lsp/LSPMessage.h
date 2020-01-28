@@ -40,7 +40,6 @@ public:
 
 private:
     RawLSPMessage msg;
-    bool canceled = false;
 
 public:
     /**
@@ -64,11 +63,11 @@ public:
     /** A more specific timer for the given method. Used to track latency for specific types of requests. */
     std::unique_ptr<Timer> methodTimer;
 
-    /** If `true`, then this LSPMessage contains a canceled LSP request. */
-    bool isCanceled() const;
+    /** Cancels this request _and_ its timers. Returns a ResponseMessage to send back to the client. */
+    std::unique_ptr<ResponseMessage> cancelRequest();
 
-    /** Cancels this message. */
-    void cancel();
+    /** Cancels the timers associated with this message. */
+    void cancelTimers();
 
     /**
      * Returns an ID if the message has one. Otherwise, returns nullopt.
