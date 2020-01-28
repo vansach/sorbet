@@ -127,9 +127,10 @@ const core::FileHash &findHash(int id, const vector<core::FileHash> &globalState
     return it->second;
 }
 
-bool canTakeFastPath(
+bool canTakeFastPathInternal(
     const core::GlobalState &gs, const LSPConfiguration &config, const vector<core::FileHash> &globalStateHashes,
-    const LSPFileUpdates &updates,
+    const vector<core::FileHash> &changedHashes, const vector<shared_ptr<core::File>> &changedFiles,
+    bool hasNewFiles = false,
     const UnorderedMap<int, core::FileHash> &overriddingStateHashes = UnorderedMap<int, core::FileHash>()) {
     Timer timeit(config.logger, "fast_path_decision");
     auto &logger = *config.logger;
@@ -139,16 +140,14 @@ bool canTakeFastPath(
         return false;
     }
     // Path taken after the first time an update has been encountered. Hack since we can't roll back new files just yet.
-    if (updates.hasNewFiles) {
+    if (hasNewFiles) {
         logger.debug("Taking slow path because update has a new file");
         prodCategoryCounterInc("lsp.slow_path_reason", "new_file");
         return false;
     }
-    const auto &hashes = updates.updatedFileHashes;
-    auto &changedFiles = updates.updatedFiles;
     logger.debug("Trying to see if fast path is available after {} file changes", changedFiles.size());
 
-    ENFORCE(changedFiles.size() == hashes.size());
+    ENFORCE(changedFiles.size() == changedHashes.size());
     int i = -1;
     {
         for (auto &f : changedFiles) {
@@ -161,12 +160,12 @@ bool canTakeFastPath(
             } else {
                 auto &oldHash = findHash(fref.id(), globalStateHashes, overriddingStateHashes);
                 ENFORCE(oldHash.definitions.hierarchyHash != core::GlobalStateHash::HASH_STATE_NOT_COMPUTED);
-                if (hashes[i].definitions.hierarchyHash == core::GlobalStateHash::HASH_STATE_INVALID) {
+                if (changedHashes[i].definitions.hierarchyHash == core::GlobalStateHash::HASH_STATE_INVALID) {
                     logger.debug("Taking slow path because {} has a syntax error", f->path());
                     prodCategoryCounterInc("lsp.slow_path_reason", "syntax_error");
                     return false;
-                } else if (hashes[i].definitions.hierarchyHash != core::GlobalStateHash::HASH_STATE_INVALID &&
-                           hashes[i].definitions.hierarchyHash != oldHash.definitions.hierarchyHash) {
+                } else if (changedHashes[i].definitions.hierarchyHash != core::GlobalStateHash::HASH_STATE_INVALID &&
+                           changedHashes[i].definitions.hierarchyHash != oldHash.definitions.hierarchyHash) {
                     logger.debug("Taking slow path because {} has changed definitions", f->path());
                     prodCategoryCounterInc("lsp.slow_path_reason", "changed_definition");
                     return false;
@@ -176,6 +175,14 @@ bool canTakeFastPath(
     }
     logger.debug("Taking fast path");
     return true;
+}
+
+bool updateCanTakeFastPath(
+    const core::GlobalState &gs, const LSPConfiguration &config, const vector<core::FileHash> &globalStateHashes,
+    const LSPFileUpdates &updates,
+    const UnorderedMap<int, core::FileHash> &overriddingStateHashes = UnorderedMap<int, core::FileHash>()) {
+    return canTakeFastPathInternal(gs, config, globalStateHashes, updates.updatedFileHashes, updates.updatedFiles,
+                                   updates.hasNewFiles, overriddingStateHashes);
 }
 
 UnorderedMap<int, core::FileHash> mergeEvictions(const UnorderedMap<int, core::FileHash> &olderEvictions,
@@ -192,13 +199,17 @@ UnorderedMap<int, core::FileHash> mergeEvictions(const UnorderedMap<int, core::F
 
 } // namespace
 
+bool LSPLoop::canTakeFastPath(const SorbetWorkspaceEditParams &params, const vector<core::FileHash> &fileHashes) const {
+    return canTakeFastPathInternal(*initialGS, *config, globalStateHashes, fileHashes, params.updates);
+}
+
 LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
     LSPFileUpdates update;
     update.epoch = edit.epoch;
     update.editCount = edit.mergeCount + 1;
     update.updatedFileHashes = LSPTypechecker::computeFileHashes(*config, edit.updates, *emptyWorkers);
     update.updatedFiles = move(edit.updates);
-    update.canTakeFastPath = canTakeFastPath(*initialGS, *config, globalStateHashes, update);
+    update.canTakeFastPath = updateCanTakeFastPath(*initialGS, *config, globalStateHashes, update);
     update.cancellationExpected = edit.sorbetCancellationExpected;
     update.preemptionsExpected = edit.sorbetPreemptionsExpected;
 
@@ -265,7 +276,7 @@ LSPFileUpdates LSPLoop::commitEdit(SorbetWorkspaceEditParams &edit) {
         auto merged = update.copy();
         merged.mergeOlder(pendingTypecheckUpdates);
         auto mergedEvictions = mergeEvictions(pendingTypecheckEvictedStateHashes, evictedHashes);
-        merged.canTakeFastPath = canTakeFastPath(*initialGS, *config, globalStateHashes, merged, mergedEvictions);
+        merged.canTakeFastPath = updateCanTakeFastPath(*initialGS, *config, globalStateHashes, merged, mergedEvictions);
         // Cancel if old + new takes fast path, or if the new update will take the slow path anyway.
         if ((merged.canTakeFastPath || !update.canTakeFastPath) &&
             initialGS->epochManager->tryCancelSlowPath(merged.epoch)) {

@@ -62,6 +62,9 @@ class LSPLoop {
      * and file hashes. Also handles canceling the running slow path. */
     LSPFileUpdates commitEdit(SorbetWorkspaceEditParams &edit);
 
+    /** Determines if the given edit can take the fast path. */
+    bool canTakeFastPath(const SorbetWorkspaceEditParams &params, const std::vector<core::FileHash> &fileHashes) const;
+
 public:
     LSPLoop(std::unique_ptr<core::GlobalState> initialGS, WorkerPool &workers,
             const std::shared_ptr<LSPConfiguration> &config);
