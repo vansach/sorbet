@@ -37,7 +37,8 @@ bool PreemptionTaskManager::tryRunScheduledPreemptionTask(core::GlobalState &gs)
     TypecheckEpochManager::assertConsistentThread(
         typecheckingThreadId, "PreemptionTaskManager::tryRunScheduledPreemptionTask", "typechecking thread");
     auto preemptTask = atomic_load(&this->preemptTask);
-    if (preemptTask != nullptr) {
+    if (preemptTask != nullptr &&
+        atomic_compare_exchange_strong(&this->preemptTask, &preemptTask, shared_ptr<Task>(nullptr))) {
         // Capture with write lock before running task. Ensures that all worker threads park before we proceed.
         absl::MutexLock lock(&typecheckMutex);
         // Invariant: Typechecking _cannot_ be canceled before or during a preemption task.
@@ -49,9 +50,6 @@ bool PreemptionTaskManager::tryRunScheduledPreemptionTask(core::GlobalState &gs)
         auto previousErrorQueue = move(gs.errorQueue);
         gs.errorQueue = make_shared<core::ErrorQueue>(previousErrorQueue->logger, previousErrorQueue->tracer);
         gs.errorQueue->ignoreFlushes = true;
-        // Unset preempt task before running, as running the task will unblock the message processing thread
-        // which may decide to schedule a new task.
-        atomic_store(&this->preemptTask, shared_ptr<lsp::Task>(nullptr));
         gs.tracer().debug("[Typechecker] Beginning preemption task.");
         preemptTask->run();
         gs.tracer().debug("[Typechecker] Preemption task complete.");
@@ -60,6 +58,10 @@ bool PreemptionTaskManager::tryRunScheduledPreemptionTask(core::GlobalState &gs)
         return true;
     }
     return false;
+}
+
+bool PreemptionTaskManager::tryCancelScheduledPreemptionTask(std::shared_ptr<Task> &task) {
+    return atomic_compare_exchange_strong(&preemptTask, &task, shared_ptr<Task>(nullptr));
 }
 
 unique_ptr<absl::ReaderMutexLock> PreemptionTaskManager::lockPreemption() const {

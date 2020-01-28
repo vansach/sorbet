@@ -32,6 +32,8 @@ public:
     // Runs the scheduled preemption task, if any.
     // Handles running task with a fresh errorQueue, and restoring previous errorQueue when done.
     bool tryRunScheduledPreemptionTask(core::GlobalState &gs);
+    // Tries to cancel the scheduled preemption task. Returns true if it succeeds.
+    bool tryCancelScheduledPreemptionTask(std::shared_ptr<Task> &task);
     // Run only from typechecker worker threads. Prevents preemption from occurring while the ReaderMutexLock is alive.
     std::unique_ptr<absl::ReaderMutexLock> lockPreemption() const;
     // (For testing only) Assert that typecheckMutex is held.
