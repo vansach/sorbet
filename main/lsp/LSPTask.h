@@ -4,6 +4,10 @@
 #include "main/lsp/LSPMessage.h"
 #include "main/lsp/LSPTypecheckerCoordinator.h"
 
+namespace absl {
+class Notification;
+}
+
 namespace sorbet::realmain::lsp {
 /**
  * A work unit that needs to execute on the typechecker thread. Subclasses implement `run`.
@@ -59,6 +63,22 @@ protected:
 
 public:
     void run(LSPTypecheckerDelegate &typechecker) override;
+};
+
+class LSPLoop;
+struct QueueState;
+class LSPQueuePreemptionTask final : public LSPTask {
+    absl::Notification &started;
+    absl::Notification &finished;
+    absl::Mutex &processingMtx;
+    QueueState &processingQueue;
+    LSPLoop &loop;
+
+public:
+    LSPQueuePreemptionTask(absl::Notification &started, absl::Notification &finished, absl::Mutex &processingMtx,
+                           QueueState &processingQueue, LSPLoop &loop);
+
+    void run(LSPTypecheckerDelegate &tc) override;
 };
 
 } // namespace sorbet::realmain::lsp

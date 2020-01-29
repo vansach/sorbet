@@ -6,6 +6,7 @@
 #include "lsp.h"
 #include "main/lsp/LSPInput.h"
 #include "main/lsp/LSPPreprocessor.h"
+#include "main/lsp/LSPTask.h"
 #include "main/lsp/watchman/WatchmanProcess.h"
 #include "main/options/options.h" // For EarlyReturnWithCode.
 #include <iostream>
@@ -14,6 +15,7 @@ using namespace std;
 
 namespace sorbet::realmain::lsp {
 
+namespace {
 class NotifyOnDestruction {
     absl::Mutex &mutex;
     bool &flag;
@@ -119,6 +121,7 @@ void tagNewRequest(const std::shared_ptr<spd::logger> &logger, LSPMessage &msg) 
         }
     }
 }
+} // namespace
 
 unique_ptr<Joinable> LSPPreprocessor::runPreprocessor(QueueState &incomingQueue, absl::Mutex &incomingMtx,
                                                       QueueState &processingQueue, absl::Mutex &processingMtx) {
@@ -287,6 +290,37 @@ optional<unique_ptr<core::GlobalState>> LSPLoop::runLSP(shared_ptr<LSPInput> inp
                         break;
                     }
                 }
+                // Before popping the message off, check if we are 1) running a slow path and 2) if this new message
+                // will preempt.
+                if (initialGS && initialGS->epochManager->getStatus().slowPathRunning &&
+                    canPreempt(*processingQueue.pendingRequests.front())) {
+                    absl::Notification metaTaskStarted;
+                    absl::Notification metaTaskFinished;
+                    // Let's try to preempt with a meta task.
+                    auto task = typecheckerCoord.trySchedulePreemptMetaTask(make_unique<LSPQueuePreemptionTask>(
+                        metaTaskStarted, metaTaskFinished, processingMtx, processingQueue, *this));
+                    if (task != nullptr) {
+                        // Scheduling succeeded. Wait until queue changes.
+                        auto checkIfHeadOfQueueCanPreempt = [&]() -> bool {
+                            return metaTaskStarted.HasBeenNotified() || processingQueue.pendingRequests.empty() ||
+                                   !canPreempt(*processingQueue.pendingRequests.front());
+                        };
+
+                        processingMtx.Await(absl::Condition(&checkIfHeadOfQueueCanPreempt));
+
+                        // Either the task started, pending requests is empty, or the head of the queue is no longer
+                        // preemptible. Canceling will fail if the task has already started.
+                        if (!typecheckerCoord.tryCancelPreemptMetaTask(task)) {
+                            processingMtx.Unlock();
+                            // We couldn't cancel it, so wait for it to finish.
+                            metaTaskFinished.WaitForNotification();
+                            processingMtx.Lock();
+                        }
+                        // Start a fresh iteration of the loop.
+                        continue;
+                    }
+                }
+
                 msg = move(processingQueue.pendingRequests.front());
                 processingQueue.pendingRequests.pop_front();
                 hasMoreMessages = !processingQueue.pendingRequests.empty();

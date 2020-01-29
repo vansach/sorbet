@@ -1,6 +1,8 @@
 #include "main/lsp/LSPTask.h"
+#include "absl/synchronization/notification.h"
 #include "common/sort.h"
 #include "main/lsp/LSPOutput.h"
+#include "main/lsp/lsp.h"
 
 namespace sorbet::realmain::lsp {
 using namespace std;
@@ -126,6 +128,33 @@ void LSPTask::addLocIfExists(const core::GlobalState &gs, vector<unique_ptr<Loca
     if (location != nullptr) {
         locs.push_back(std::move(location));
     }
+}
+
+LSPQueuePreemptionTask::LSPQueuePreemptionTask(absl::Notification &started, absl::Notification &finished,
+                                               absl::Mutex &processingMtx, QueueState &processingQueue, LSPLoop &loop)
+    : LSPTask(*loop.config, false), started(started), finished(finished), processingMtx(processingMtx),
+      processingQueue(processingQueue), loop(loop) {}
+
+void LSPQueuePreemptionTask::run(LSPTypecheckerDelegate &tc) {
+    started.Notify();
+    auto oldErrorQueue = move(loop.initialGS->errorQueue);
+    loop.initialGS->errorQueue = make_shared<core::ErrorQueue>(oldErrorQueue->logger, oldErrorQueue->tracer);
+    loop.initialGS->errorQueue->ignoreFlushes = true;
+    for (;;) {
+        unique_ptr<LSPMessage> msg;
+        {
+            absl::MutexLock lck(&processingMtx);
+            if (processingQueue.pendingRequests.empty() || !loop.canPreempt(*processingQueue.pendingRequests.front())) {
+                break;
+            }
+            msg = move(processingQueue.pendingRequests.front());
+            processingQueue.pendingRequests.pop_front();
+        }
+        prodCounterInc("lsp.messages.received");
+        loop.processRequestInternal(*msg);
+    }
+    loop.initialGS->errorQueue = move(oldErrorQueue);
+    finished.Notify();
 }
 
 } // namespace sorbet::realmain::lsp

@@ -140,7 +140,7 @@ LSPTypecheckerCoordinator::LSPTypecheckerCoordinator(const shared_ptr<const LSPC
       emptyWorkers(WorkerPool::create(0, *config->logger)) {}
 
 void LSPTypecheckerCoordinator::asyncRunInternal(shared_ptr<core::lsp::Task> task) {
-    if (hasDedicatedThread) {
+    if (hasDedicatedThread && dedicatedThreadId != this_thread::get_id()) {
         tasks.push(move(task), 1);
     } else {
         task->run();
@@ -150,14 +150,14 @@ void LSPTypecheckerCoordinator::asyncRunInternal(shared_ptr<core::lsp::Task> tas
 void LSPTypecheckerCoordinator::syncRun(unique_ptr<LSPTask> task) {
     // All single-threaded tasks can preempt.
     const bool canPreempt = !task->enableMultithreading;
-    absl::Notification notification;
     auto wrappedTask = make_shared<TypecheckerTask>(
         move(task), make_unique<LSPTypecheckerDelegate>(canPreempt ? *emptyWorkers : workers, typechecker),
         hasDedicatedThread);
 
     // Plant this timer before scheduling task to preempt, as task could run before we plant the timer!
     wrappedTask->timeLatencyUntilRun(make_unique<Timer>(*config->logger, "latency.preempt_slow_path"));
-    if (canPreempt && preemptionTaskManager->trySchedulePreemptionTask(wrappedTask)) {
+    if (canPreempt && hasDedicatedThread && dedicatedThreadId != this_thread::get_id() &&
+        preemptionTaskManager->trySchedulePreemptionTask(wrappedTask)) {
         // Preempted; task is guaranteed to run by interrupting the slow path.
     } else {
         // Did not preempt, so don't collect a latency metric.
@@ -182,6 +182,25 @@ void LSPTypecheckerCoordinator::typecheckOnSlowPath(LSPFileUpdates updates) {
     t->waitUntilStarted();
 }
 
+shared_ptr<core::lsp::Task>
+LSPTypecheckerCoordinator::trySchedulePreemptMetaTask(std::unique_ptr<LSPQueuePreemptionTask> task) {
+    auto wrappedTask = make_shared<TypecheckerTask>(
+        move(task), make_unique<LSPTypecheckerDelegate>(*emptyWorkers, typechecker), hasDedicatedThread);
+    // Plant this timer before scheduling task to preempt, as task could run before we plant the timer!
+    wrappedTask->timeLatencyUntilRun(make_unique<Timer>(*config->logger, "latency.preempt_slow_path"));
+    if (preemptionTaskManager->trySchedulePreemptionTask(wrappedTask)) {
+        // Pointer to wrapped task is the token.
+        return wrappedTask;
+    }
+    // Did not preempt, so don't collect a latency metric.
+    wrappedTask->cancelTimeLatencyUntilRun();
+    return nullptr;
+}
+
+bool LSPTypecheckerCoordinator::tryCancelPreemptMetaTask(shared_ptr<core::lsp::Task> &task) {
+    return preemptionTaskManager->tryCancelScheduledPreemptionTask(task);
+}
+
 unique_ptr<core::GlobalState> LSPTypecheckerCoordinator::shutdown() {
     unique_ptr<core::GlobalState> gs;
     // shouldTerminate and gs are captured by reference.
@@ -197,6 +216,7 @@ unique_ptr<Joinable> LSPTypecheckerCoordinator::startTypecheckerThread() {
     hasDedicatedThread = true;
     return runInAThread("Typechecker", [&]() -> void {
         typechecker.changeThread();
+        dedicatedThreadId = this_thread::get_id();
 
         while (!shouldTerminate) {
             shared_ptr<core::lsp::Task> task;

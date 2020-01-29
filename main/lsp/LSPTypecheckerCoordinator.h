@@ -6,10 +6,12 @@
 
 namespace sorbet::core::lsp {
 class PreemptionTaskManager;
-}
+class Task;
+} // namespace sorbet::core::lsp
 
 namespace sorbet::realmain::lsp {
 class LSPTask;
+class LSPQueuePreemptionTask;
 /**
  * Handles typechecking and other queries. Can either operate in single-threaded mode (in which lambdas passed to
  * syncRun/asyncRun run-to-completion immediately) or dedicated-thread mode (in which lambdas are enqueued to execute on
@@ -27,6 +29,7 @@ class LSPTypecheckerCoordinator final {
     std::shared_ptr<const LSPConfiguration> config;
     /** If 'true', then the typechecker is running on a dedicated thread. */
     bool hasDedicatedThread;
+    std::thread::id dedicatedThreadId;
 
     // A worker pool with typically as many threads as cores. Can only be used during synchronous blocking operations.
     WorkerPool &workers;
@@ -62,6 +65,18 @@ public:
      * TODO(jvilk): Make single-threaded tasks scheduled this way preempt the slow path.
      */
     void syncRun(std::unique_ptr<LSPTask> task);
+
+    /**
+     * Tries to schedule a special queue task to preempt the slow path with a sequence of tasks. Returns the task for
+     * use as a cancellation token if it succeeds, `nullptr` if it does not.
+     */
+    std::shared_ptr<core::lsp::Task> trySchedulePreemptMetaTask(std::unique_ptr<LSPQueuePreemptionTask> task);
+
+    /**
+     * Tries to cancel a scheduled LSPQueuePreemptionTask using the token returned from `tryPreemptMetaTask`.
+     * Returns true if cancelation succeeds, false if the task has already run.
+     */
+    bool tryCancelPreemptMetaTask(std::shared_ptr<core::lsp::Task> &task);
 
     /**
      * Safely shuts down the typechecker and returns the final GlobalState object. Blocks until typechecker completes

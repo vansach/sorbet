@@ -199,6 +199,36 @@ UnorderedMap<int, core::FileHash> mergeEvictions(const UnorderedMap<int, core::F
 
 } // namespace
 
+// TODO(jvilk): This is a nasty hack. We should encode this in Task objects and switch away from LSPMessage.
+bool LSPLoop::canPreempt(const LSPMessage &msg) const {
+    if (msg.isResponse()) {
+        return false;
+    }
+    switch (msg.method()) {
+        // We're being conservative here with a whitelist.
+        case LSPMethod::SorbetReadFile:
+        case LSPMethod::TextDocumentCodeAction:
+        case LSPMethod::TextDocumentCompletion:
+        case LSPMethod::TextDocumentDefinition:
+        case LSPMethod::TextDocumentDocumentHighlight:
+        case LSPMethod::TextDocumentDocumentSymbol:
+        case LSPMethod::TextDocumentHover:
+        case LSPMethod::TextDocumentSignatureHelp:
+        case LSPMethod::TextDocumentTypeDefinition:
+        case LSPMethod::WorkspaceSymbol:
+            return true;
+        case LSPMethod::SorbetWorkspaceEdit: {
+            const auto &params = get<unique_ptr<SorbetWorkspaceEditParams>>(msg.asNotification().params);
+            // TODO(jvilk): We throw away these hashes; perhaps they could be reused?
+            auto hashes = LSPTypechecker::computeFileHashes(*config, params->updates, *emptyWorkers);
+            // Only the fast path can preempt.
+            return this->canTakeFastPath(*params, hashes);
+        }
+        default:
+            return false;
+    }
+}
+
 bool LSPLoop::canTakeFastPath(const SorbetWorkspaceEditParams &params, const vector<core::FileHash> &fileHashes) const {
     return canTakeFastPathInternal(*initialGS, *config, globalStateHashes, fileHashes, params.updates);
 }

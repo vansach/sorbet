@@ -20,9 +20,11 @@ namespace sorbet::realmain::lsp {
 
 class LSPInput;
 class LSPConfiguration;
+class LSPQueuePreemptionTask;
 
 class LSPLoop {
     friend class LSPWrapper;
+    friend class LSPQueuePreemptionTask;
 
     /** Encapsulates the active configuration for the language server. */
     std::shared_ptr<const LSPConfiguration> config;
@@ -62,8 +64,10 @@ class LSPLoop {
      * and file hashes. Also handles canceling the running slow path. */
     LSPFileUpdates commitEdit(SorbetWorkspaceEditParams &edit);
 
-    /** Determines if the given edit can take the fast path. */
+    /** Determines if the given edit can take the fast path relative to the most recently committed edit. */
     bool canTakeFastPath(const SorbetWorkspaceEditParams &params, const std::vector<core::FileHash> &fileHashes) const;
+
+    bool canPreempt(const LSPMessage &msg) const;
 
 public:
     LSPLoop(std::unique_ptr<core::GlobalState> initialGS, WorkerPool &workers,
