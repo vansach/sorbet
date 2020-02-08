@@ -1118,7 +1118,19 @@ class Regexp < Object
     )
     .returns(T.nilable(MatchData))
   end
-  def match(arg0, arg1=T.unsafe(nil)); end
+  def match(arg0, arg1=0); end
+
+  # Returns a true or false indicates whether the regexp is matched or not
+  # without updating $~ and other related variables. If the second parameter is 
+  # present, it specifies the position in the string to begin the search.
+  sig do
+    params(
+        arg0: T.nilable(String),
+        arg1: Integer,
+    )
+    .returns(T::Boolean)
+  end
+  def match?(arg0, arg1=0); end
 
   # Returns a hash representing information about named captures of *rxp*.
   #
