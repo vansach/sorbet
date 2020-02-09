@@ -20,6 +20,8 @@ module T::Utils
       T::Enumerator[T.untyped]
     elsif val == ::Range
       T::Range[T.untyped]
+    elsif val == ::NilClass
+      T::Types::Simple::Private::Nil::INSTANCE
     elsif val.is_a?(Module)
       T::Types::Simple.new(val) # rubocop:disable PrisonGuard/UseOpusTypesShortcut
     elsif val.is_a?(::Array)

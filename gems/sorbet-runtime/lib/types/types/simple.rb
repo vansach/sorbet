@@ -29,5 +29,23 @@ module T::Types
         false
       end
     end
+
+    module Private
+      class Nil < Simple
+
+        def initialize(raw_type)
+          raise ArgumentError.new("#{raw_type} is not NilClass") unless raw_type == NilClass
+          super
+        end
+
+        # @override Simple
+        def valid?(obj)
+          # This is ~2x as fast as obj.is_a?(NilClass) on Ruby 2.6
+          nil == obj
+        end
+
+        INSTANCE = new(NilClass).freeze
+      end
+    end
   end
 end
